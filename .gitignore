@@ -1,0 +1,13 @@
+# Ignorar archivos de configuración específicos
+Cliente/config.py
+
+# Ignorar entornos virtuales (si usas Python)
+venv/
+.env
+
+# Ignorar archivos generados por VS
+.vs/
+bin/
+obj/
+*.user
+*.suo
