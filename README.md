@@ -68,13 +68,36 @@ Este proyecto permite:
 - Optimización de recursos para operación continua
 - Registro de eventos y errores
 
-## 🛠️ Instalación
+## 📁 Estructura
+📂 Servidor/
+│
+├── main.py                # Servidor Flask principal
+├── camera_manager.py      # Manejo de cámaras y captura
+├── led_control.py         # Control de LEDs por GPIO
+├── dht_sensor.py          # Lectura del DHT11
+├── experiment.py          # Lógica del experimento periódico
+└── utils.py               # Utilidades generales (timestamp, carpetas)
+
+📂 Cliente/
+├── main.py                   # Punto de entrada
+├── config.py                 # IP y puertos
+├── network.py                # Peticiones HTTP
+├── system_monitor.py         # Info de CPU/RAM/almacenamiento
+├── video_thread.py           # Hilo de recepción de video
+│
+├── gui/
+│   ├── main_window.py        # Ventana principal y tabs
+│   ├── tab_bienvenida.py     # Pestaña 1
+│   ├── tab_visualizacion.py  # Pestaña 2
+│   ├── tab_calibracion.py    # Pestaña 3
+│   └── tab_experimento.py    # Pestaña 4
+│
+└── utils.py                  # Histograma, formatos, helpers
 
 ### Requisitos
 
 - Python 3.8+
-- Raspberry Pi OS (32-bit)
-- Librerías (instalar con `pip install -r requirements.txt`):
+- Raspberry Pi 3b
 
 ```bash
 # requirements.txt
