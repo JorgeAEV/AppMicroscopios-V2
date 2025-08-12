@@ -1,19 +1,63 @@
-# network.py
 import requests
+from requests.exceptions import RequestException
 from config import BASE_URL
 
-def get_cameras():
-    return requests.get(f"{BASE_URL}/cameras").json()
+class NetworkClient:
+    def __init__(self):
+        self.base_url = BASE_URL
 
-def set_camera(cam_id):
-    return requests.post(f"{BASE_URL}/set_camera", json={"camera_id": cam_id})
+    def get_cameras(self):
+        try:
+            r = requests.get(f"{self.base_url}/cameras", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException:
+            return []
 
-def start_experiment(path, duration, interval):
-    return requests.post(f"{BASE_URL}/start_experiment", json={
-        "path": path,
-        "duration": duration,
-        "interval": interval
-    })
+    def get_video_feed_url(self, cam_id):
+        return f"{self.base_url}/video_feed/{cam_id}"
 
-def stop_experiment():
-    return requests.post(f"{BASE_URL}/stop_experiment")
+    def led_control(self, cam_id, action):
+        try:
+            r = requests.post(f"{self.base_url}/led/{cam_id}/{action}", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException:
+            return {'status': 'error', 'message': 'Error de conexión'}
+
+    def get_sensor_data(self):
+        try:
+            r = requests.get(f"{self.base_url}/sensor", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException:
+            return {}
+
+    def start_experiment(self, save_path, duration, interval):
+        try:
+            payload = {
+                'save_path': save_path,
+                'duration': duration,
+                'interval': interval
+            }
+            r = requests.post(f"{self.base_url}/experiment/start", json=payload, timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            return {'status': 'error', 'message': str(e)}
+
+    def stop_experiment(self):
+        try:
+            r = requests.post(f"{self.base_url}/experiment/stop", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            return {'status': 'error', 'message': str(e)}
+
+    def get_status(self):
+        try:
+            r = requests.get(f"{self.base_url}/status", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException:
+            return {}

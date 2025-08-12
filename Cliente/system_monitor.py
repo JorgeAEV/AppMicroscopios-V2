@@ -1,23 +1,16 @@
-# system_monitor.py
-import psutil
-import shutil
-import os
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from network import NetworkClient
 
-def get_cpu_usage():
-    return psutil.cpu_percent(interval=0.5)
+class SystemMonitor(QObject):
+    status_updated = pyqtSignal(dict)
 
-def get_ram_usage():
-    mem = psutil.virtual_memory()
-    return mem.used // (1024 ** 2), mem.total // (1024 ** 2)
+    def __init__(self, poll_interval_ms=2000):
+        super().__init__()
+        self.client = NetworkClient()
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.poll_status)
+        self.timer.start(poll_interval_ms)
 
-def get_disk_space():
-    total, used, free = shutil.disk_usage(os.path.expanduser("~"))
-    return free // (1024 ** 2), free // (1024 ** 3)
-
-def get_temperature():
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-            temp = int(f.read()) / 1000
-        return temp
-    except:
-        return -1
+    def poll_status(self):
+        status = self.client.get_status()
+        self.status_updated.emit(status)

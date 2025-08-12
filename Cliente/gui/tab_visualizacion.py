@@ -1,116 +1,102 @@
-# gui/tab_visualizacion.py
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QTabWidget, QHBoxLayout
-)
-from PyQt6.QtCore import QTimer
-from gui.tab_calibracion import TabCalibracion
-from video_thread import VideoThread
-from network import get_cameras
-from config import BASE_URL
-from system_monitor import get_cpu_usage, get_ram_usage, get_disk_space, get_temperature
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton, QHBoxLayout
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap, QImage
 import cv2
+import numpy as np
+from video_thread import VideoThread
+from network import NetworkClient
+from system_monitor import SystemMonitor
 
 class TabVisualizacion(QWidget):
-    def __init__(self, parent_tabs=None):
+    def __init__(self):
         super().__init__()
-        self.parent_tabs = parent_tabs
-        self.cam_threads = {}
-        self.image_labels = {}
-        self.init_ui()
-        self.populate_camera_tabs()
-        self.update_status()
+        self.client = NetworkClient()
+        self.system_monitor = SystemMonitor()
 
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_status)
-        self.timer.start(5000)
+        self.video_threads = {}  # cam_id -> VideoThread
+
+        self.init_ui()
+        self.load_cameras()
+        self.system_monitor.status_updated.connect(self.update_status)
 
     def init_ui(self):
-        self.layout = QVBoxLayout()
+        layout = QVBoxLayout()
 
-        self.camera_tabs = QTabWidget()
-        self.layout.addWidget(self.camera_tabs)
+        self.tabs_cams = QTabWidget()
+        layout.addWidget(self.tabs_cams)
+
+        # Botones arriba
+        btn_layout = QHBoxLayout()
+        self.btn_regresar = QPushButton("Regresar")
+        self.btn_calibracion = QPushButton("Calibración")
+        self.btn_iniciar = QPushButton("Iniciar Experimento")
+
+        btn_layout.addWidget(self.btn_regresar)
+        btn_layout.addWidget(self.btn_calibracion)
+        btn_layout.addWidget(self.btn_iniciar)
+        layout.addLayout(btn_layout)
 
         # Panel de estado
-        self.status_layout = QHBoxLayout()
-        self.cpu_label = QLabel()
-        self.ram_label = QLabel()
-        self.disk_label = QLabel()
-        self.temp_label = QLabel()
+        self.lbl_temp = QLabel("Temperatura CPU: - °C")
+        self.lbl_cpu = QLabel("CPU Uso: - %")
+        self.lbl_ram = QLabel("RAM Usada: - MB / - MB")
+        self.lbl_disk = QLabel("Almacenamiento Libre: - GB")
 
-        for label in [self.cpu_label, self.ram_label, self.disk_label, self.temp_label]:
-            self.status_layout.addWidget(label)
+        estado_layout = QVBoxLayout()
+        estado_layout.addWidget(self.lbl_temp)
+        estado_layout.addWidget(self.lbl_cpu)
+        estado_layout.addWidget(self.lbl_ram)
+        estado_layout.addWidget(self.lbl_disk)
 
-        self.layout.addLayout(self.status_layout)
+        layout.addLayout(estado_layout)
 
-        # Botones
-        self.button_layout = QHBoxLayout()
-        self.btn_back = QPushButton("Regresar")
-        self.btn_calibracion = QPushButton("Calibración")
-        self.btn_experimento = QPushButton("Iniciar Experimento")
+        self.setLayout(layout)
 
-        self.button_layout.addWidget(self.btn_back)
-        self.button_layout.addWidget(self.btn_calibracion)
-        self.button_layout.addWidget(self.btn_experimento)
-        self.layout.addLayout(self.button_layout)
+    def load_cameras(self):
+        cameras = self.client.get_cameras()
+        self.tabs_cams.clear()
+        self.stop_all_videos()
 
-        self.setLayout(self.layout)
-
-        self.btn_back.clicked.connect(self.go_back)
-        self.btn_calibracion.clicked.connect(self.go_calibracion)
-        # Nota: aún no se implementa el experimento
-
-    def populate_camera_tabs(self):
-        cameras = get_cameras()
         for cam_id in cameras:
-            label = QLabel()
-            label.setFixedSize(640, 480)
-            self.image_labels[cam_id] = label
-
             tab = QWidget()
             tab_layout = QVBoxLayout()
-            tab_layout.addWidget(label)
-            tab.setLayout(tab_layout)
 
-            self.camera_tabs.addTab(tab, f"Cámara {cam_id}")
+            lbl_video = QLabel()
+            lbl_video.setFixedSize(640, 480)
+            tab_layout.addWidget(lbl_video)
+
+            tab.setLayout(tab_layout)
+            self.tabs_cams.addTab(tab, f"Microscopio {cam_id}")
 
             # Iniciar hilo de video
-            thread = VideoThread(f"{BASE_URL}/video_feed")
-            thread.change_pixmap_signal.connect(lambda img, cid=cam_id: self.update_image(cid, img))
-            thread.start()
-            self.cam_threads[cam_id] = thread
+            url = self.client.get_video_feed_url(cam_id)
+            video_thread = VideoThread(url)
+            video_thread.frame_received.connect(lambda img, lbl=lbl_video: self.update_image(lbl, img))
+            video_thread.start()
 
-    def update_image(self, cam_id, cv_img):
-        if cam_id in self.image_labels:
-            qt_img = self.convert_cv_qt(cv_img)
-            self.image_labels[cam_id].setPixmap(qt_img)
+            self.video_threads[cam_id] = video_thread
 
-    def convert_cv_qt(self, cv_img):
+    def stop_all_videos(self):
+        for thread in self.video_threads.values():
+            thread.stop()
+        self.video_threads.clear()
+
+    def update_image(self, label, cv_img):
         rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
-        convert_to_Qt_format = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-        return QPixmap.fromImage(convert_to_Qt_format)
+        qt_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_img).scaled(label.width(), label.height(), Qt.AspectRatioMode.KeepAspectRatio)
+        label.setPixmap(pixmap)
 
-    def update_status(self):
-        self.cpu_label.setText(f"CPU: {get_cpu_usage()}%")
-        used, total = get_ram_usage()
-        self.ram_label.setText(f"RAM: {used}/{total} MB")
-        free_mb, free_gb = get_disk_space()
-        self.disk_label.setText(f"Disco: {free_gb} GB ({free_mb} MB)")
-        self.temp_label.setText(f"Temp: {get_temperature()} °C")
+    def update_status(self, status):
+        temp = status.get('temperature_c', '-')
+        cpu = status.get('cpu_percent', '-')
+        ram_used = status.get('ram_used_mb', '-')
+        ram_total = status.get('ram_total_mb', '-')
+        disk_free = status.get('disk_free_gb', '-')
 
-    def go_back(self):
-        if self.parent_tabs:
-            self.parent_tabs.setCurrentIndex(0)
-
-    def go_calibracion(self):
-        if self.parent_tabs:
-            tab = TabCalibracion(parent_tabs=self.parent_tabs)
-            self.parent_tabs.addTab(tab, "Calibración")
-            self.parent_tabs.setCurrentWidget(tab)
-
-    def closeEvent(self, event):
-        for thread in self.cam_threads.values():
-            thread.stop()
-        event.accept()
+        self.lbl_temp.setText(f"Temperatura CPU: {temp} °C")
+        self.lbl_cpu.setText(f"CPU Uso: {cpu} %")
+        self.lbl_ram.setText(f"RAM Usada: {ram_used} MB / {ram_total} MB")
+        self.lbl_disk.setText(f"Almacenamiento Libre: {disk_free} GB")

@@ -1,73 +1,103 @@
-# gui/tab_calibracion.py
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QSlider, QFileDialog
-)
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QPushButton, QHBoxLayout, QMessageBox
 from PyQt6.QtCore import Qt
-from video_thread import VideoThread
-from config import BASE_URL
-from utils import generate_rgb_histogram
+from PyQt6.QtGui import QPixmap, QImage
 import cv2
-from PyQt6.QtGui import QImage, QPixmap
+import numpy as np
+from video_thread import VideoThread
+from network import NetworkClient
+from utils import timestamp_now
+import matplotlib.pyplot as plt
 
 class TabCalibracion(QWidget):
-    def __init__(self, parent_tabs=None):
+    def __init__(self):
         super().__init__()
-        self.parent_tabs = parent_tabs
+        self.client = NetworkClient()
+        self.current_cam_id = None  # Será seteado desde fuera o UI
         self.video_thread = None
+
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout()
 
-        self.label_video = QLabel()
-        self.label_video.setFixedSize(640, 480)
-        layout.addWidget(self.label_video)
+        self.image_label = QLabel("Video en vivo")
+        self.image_label.setFixedSize(640, 480)
+        layout.addWidget(self.image_label)
 
+        slider_layout = QHBoxLayout()
         self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(0, 255)
-        self.slider.setValue(128)
-        layout.addWidget(QLabel("Brillo LED (simulado):"))
-        layout.addWidget(self.slider)
+        self.slider.setRange(0, 100)
+        self.slider.setValue(0)
+        self.slider.setToolTip("Intensidad LED")
+        self.slider.valueChanged.connect(self.led_intensity_changed)
+        slider_layout.addWidget(QLabel("Brillo LED:"))
+        slider_layout.addWidget(self.slider)
+        layout.addLayout(slider_layout)
 
-        self.histogram_btn = QPushButton("Generar histograma RGB de imagen de prueba")
-        layout.addWidget(self.histogram_btn)
-
-        self.btn_back = QPushButton("Regresar")
-        layout.addWidget(self.btn_back)
+        self.btn_histograma = QPushButton("Mostrar Histograma RGB")
+        self.btn_histograma.clicked.connect(self.show_histogram)
+        layout.addWidget(self.btn_histograma)
 
         self.setLayout(layout)
 
-        self.histogram_btn.clicked.connect(self.load_image_for_histogram)
-        self.btn_back.clicked.connect(self.go_back)
-
-        self.start_video()
-
-    def start_video(self):
-        self.video_thread = VideoThread(f"{BASE_URL}/video_feed")
-        self.video_thread.change_pixmap_signal.connect(self.update_image)
+    def start_video(self, cam_id):
+        self.current_cam_id = cam_id
+        if self.video_thread:
+            self.video_thread.stop()
+        url = self.client.get_video_feed_url(cam_id)
+        self.video_thread = VideoThread(url)
+        self.video_thread.frame_received.connect(self.update_image)
         self.video_thread.start()
 
-    def update_image(self, cv_img):
-        qt_img = self.convert_cv_qt(cv_img)
-        self.label_video.setPixmap(qt_img)
+        # Encender LED para calibración al iniciar
+        self.client.led_control(cam_id, 'on')
 
-    def convert_cv_qt(self, cv_img):
+    def stop_video(self):
+        if self.video_thread:
+            self.video_thread.stop()
+            self.video_thread = None
+        # Apagar LED al salir
+        if self.current_cam_id is not None:
+            self.client.led_control(self.current_cam_id, 'off')
+
+    def update_image(self, cv_img):
         rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
-        convert_to_Qt_format = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-        return QPixmap.fromImage(convert_to_Qt_format)
+        qt_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_img).scaled(self.image_label.width(), self.image_label.height(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.image_label.setPixmap(pixmap)
 
-    def load_image_for_histogram(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar imagen")
-        if file_path:
-            generate_rgb_histogram(file_path)
+    def led_intensity_changed(self, value):
+        # Aquí se podría implementar control PWM si el servidor lo soporta
+        # Por ahora solo imprimimos o podemos mandar un mensaje
+        print(f"Intensidad LED cambiada a {value}% (no implementado en servidor)")
 
-    def go_back(self):
-        if self.parent_tabs:
-            self.parent_tabs.setCurrentIndex(1)
+    def show_histogram(self):
+        if not self.video_thread:
+            QMessageBox.warning(self, "Advertencia", "No hay video activo para analizar")
+            return
+        # Capturar último frame para histograma
+        try:
+            # Tomamos el frame actual de la imagen QLabel
+            pixmap = self.image_label.pixmap()
+            if pixmap is None:
+                raise Exception("No hay imagen disponible")
+            img = pixmap.toImage()
+            ptr = img.bits()
+            ptr.setsize(img.byteCount())
+            arr = np.array(ptr).reshape(img.height(), img.width(), 4)
+            # Convertir RGBA a RGB
+            img_rgb = cv2.cvtColor(arr, cv2.COLOR_RGBA2RGB)
 
-    def closeEvent(self, event):
-        if self.video_thread:
-            self.video_thread.stop()
-        event.accept()
+            # Histogramas por canal
+            color = ('r','g','b')
+            plt.figure("Histograma RGB")
+            for i,col in enumerate(color):
+                hist = cv2.calcHist([img_rgb],[i],None,[256],[0,256])
+                plt.plot(hist,color = col)
+                plt.xlim([0,256])
+            plt.title("Histograma RGB")
+            plt.show()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"No se pudo generar histograma: {e}")

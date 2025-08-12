@@ -1,17 +1,19 @@
-# utils.py
-import cv2
-import matplotlib.pyplot as plt
+from datetime import datetime
 
-def generate_rgb_histogram(image_path):
-    image = cv2.imread(image_path)
-    if image is None:
-        print("No se pudo cargar la imagen.")
-        return
-    colors = ('b', 'g', 'r')
-    for i, col in enumerate(colors):
-        hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-        plt.plot(hist, color=col)
-    plt.title("Histograma RGB")
-    plt.xlabel("Intensidad")
-    plt.ylabel("Cantidad de píxeles")
-    plt.show()
+def format_bytes(size):
+    # Convierte tamaño en bytes a KB, MB o GB legible
+    for unit in ['bytes', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} PB"
+
+def format_duration(seconds):
+    # Convierte segundos a formato HH:MM:SS
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+
+def timestamp_now():
+    return datetime.now().strftime("%Y%m%d_%H%M%S")

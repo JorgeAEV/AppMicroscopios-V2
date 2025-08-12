@@ -1,116 +1,114 @@
-# gui/tab_experimento.py
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton,
-    QFileDialog, QLineEdit, QHBoxLayout
-)
-from PyQt6.QtCore import QTimer
-from network import start_experiment, stop_experiment
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QLineEdit, QFileDialog, QSpinBox, QMessageBox, QFormLayout, QProgressBar
+from PyQt6.QtCore import Qt, QTimer
+from network import NetworkClient
+from utils import format_duration
+import os
+import time
 
 class TabExperimento(QWidget):
-    def __init__(self, parent_tabs=None):
+    def __init__(self):
         super().__init__()
-        self.parent_tabs = parent_tabs
-        self.remaining_time = 0
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
-        self.experiment_active = False
+        self.client = NetworkClient()
+        self.is_running = False
+        self.time_left = 0
 
         self.init_ui()
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_time_left)
 
     def init_ui(self):
         layout = QVBoxLayout()
 
-        self.path_label = QLabel("Ruta de guardado:")
-        layout.addWidget(self.path_label)
+        form_layout = QFormLayout()
+
+        self.path_edit = QLineEdit()
+        self.btn_browse = QPushButton("Seleccionar carpeta")
+        self.btn_browse.clicked.connect(self.browse_folder)
 
         path_layout = QHBoxLayout()
-        self.path_input = QLineEdit()
-        self.browse_btn = QPushButton("Seleccionar carpeta")
-        self.browse_btn.clicked.connect(self.select_folder)
-        path_layout.addWidget(self.path_input)
-        path_layout.addWidget(self.browse_btn)
-        layout.addLayout(path_layout)
+        path_layout.addWidget(self.path_edit)
+        path_layout.addWidget(self.btn_browse)
+        form_layout.addRow("Ruta para guardar imágenes:", path_layout)
 
-        self.duration_label = QLabel("Duración (minutos):")
-        self.duration_input = QLineEdit()
-        layout.addWidget(self.duration_label)
-        layout.addWidget(self.duration_input)
+        self.duration_spin = QSpinBox()
+        self.duration_spin.setRange(1, 14400)  # 1 seg a 4 horas
+        self.duration_spin.setValue(300)
+        self.duration_spin.setSuffix(" seg")
+        form_layout.addRow("Duración total (segundos):", self.duration_spin)
 
-        self.interval_label = QLabel("Intervalo de captura (segundos):")
-        self.interval_input = QLineEdit()
-        layout.addWidget(self.interval_label)
-        layout.addWidget(self.interval_input)
+        self.interval_spin = QSpinBox()
+        self.interval_spin.setRange(1, 3600)  # 1 seg a 1 hora
+        self.interval_spin.setValue(60)
+        self.interval_spin.setSuffix(" seg")
+        form_layout.addRow("Intervalo entre capturas (segundos):", self.interval_spin)
 
-        self.start_btn = QPushButton("Iniciar experimento")
-        self.start_btn.clicked.connect(self.start_experiment)
-        layout.addWidget(self.start_btn)
+        layout.addLayout(form_layout)
 
-        self.timer_label = QLabel("Tiempo restante: --:--")
-        layout.addWidget(self.timer_label)
+        self.btn_start = QPushButton("Iniciar Experimento")
+        self.btn_start.clicked.connect(self.start_experiment)
+        layout.addWidget(self.btn_start)
 
-        self.cancel_btn = QPushButton("Cancelar experimento")
-        self.cancel_btn.clicked.connect(self.cancel_experiment)
-        self.cancel_btn.setEnabled(False)
-        layout.addWidget(self.cancel_btn)
+        self.btn_stop = QPushButton("Detener Experimento")
+        self.btn_stop.clicked.connect(self.stop_experiment)
+        self.btn_stop.setEnabled(False)
+        layout.addWidget(self.btn_stop)
 
+        self.lbl_time_left = QLabel("Tiempo restante: --:--:--")
+        layout.addWidget(self.lbl_time_left)
+
+        self.progress_bar = QProgressBar()
+        layout.addWidget(self.progress_bar)
+
+        layout.addStretch()
         self.setLayout(layout)
 
-    def select_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta")
-        if path:
-            self.path_input.setText(path)
+    def browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta para guardar imágenes")
+        if folder:
+            self.path_edit.setText(folder)
 
     def start_experiment(self):
-        path = self.path_input.text()
-        try:
-            duration_min = int(self.duration_input.text())
-            interval_sec = int(self.interval_input.text())
-        except ValueError:
-            self.timer_label.setText("Error: Valores inválidos")
+        if self.is_running:
             return
-
-        duration_sec = duration_min * 60
-        self.remaining_time = duration_sec
-
-        try:
-            resp = start_experiment(path, duration_sec, interval_sec)
-            if resp.status_code == 200:
-                self.experiment_active = True
-                self.cancel_btn.setEnabled(True)
-                self.start_btn.setEnabled(False)
-                self.timer.start(1000)
-                self.timer_label.setText(f"Tiempo restante: {self.remaining_time} s")
-                # Desactivar otras pestañas
-                if self.parent_tabs:
-                    for i in range(self.parent_tabs.count()):
-                        if self.parent_tabs.widget(i) != self:
-                            self.parent_tabs.setTabEnabled(i, False)
-            else:
-                self.timer_label.setText("Error al iniciar experimento")
-        except Exception as e:
-            self.timer_label.setText(f"Error: {e}")
-
-    def update_timer(self):
-        if self.remaining_time > 0:
-            self.remaining_time -= 1
-            mins = self.remaining_time // 60
-            secs = self.remaining_time % 60
-            self.timer_label.setText(f"Tiempo restante: {mins:02}:{secs:02}")
+        path = self.path_edit.text().strip()
+        if not path or not os.path.isdir(path):
+            QMessageBox.warning(self, "Error", "Debe seleccionar una carpeta válida")
+            return
+        duration = self.duration_spin.value()
+        interval = self.interval_spin.value()
+        if interval > duration:
+            QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración")
+            return
+        resp = self.client.start_experiment(path, duration, interval)
+        if resp.get('status') == 'ok':
+            self.is_running = True
+            self.time_left = duration
+            self.btn_start.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.timer.start(1000)
         else:
-            self.finish_experiment()
+            QMessageBox.critical(self, "Error", f"No se pudo iniciar experimento: {resp.get('message')}")
 
-    def cancel_experiment(self):
-        stop_experiment()
-        self.finish_experiment()
+    def stop_experiment(self):
+        if not self.is_running:
+            return
+        resp = self.client.stop_experiment()
+        if resp.get('status') == 'ok':
+            self.is_running = False
+            self.timer.stop()
+            self.time_left = 0
+            self.btn_start.setEnabled(True)
+            self.btn_stop.setEnabled(False)
+            self.lbl_time_left.setText("Tiempo restante: --:--:--")
+            self.progress_bar.setValue(0)
+        else:
+            QMessageBox.critical(self, "Error", f"No se pudo detener experimento: {resp.get('message')}")
 
-    def finish_experiment(self):
-        self.timer.stop()
-        self.timer_label.setText("Experimento finalizado o cancelado.")
-        self.cancel_btn.setEnabled(False)
-        self.start_btn.setEnabled(True)
-        self.experiment_active = False
-
-        # Reactivar pestañas
-        if self.parent_tabs:
-            for i in range(self.parent_tabs.count()):
-                self.parent_tabs.setTabEnabled(i, True)
+    def update_time_left(self):
+        if self.time_left > 0:
+            self.time_left -= 1
+            self.lbl_time_left.setText(f"Tiempo restante: {format_duration(self.time_left)}")
+            total = self.duration_spin.value()
+            self.progress_bar.setValue(100 * (total - self.time_left) / total)
+        else:
+            self.stop_experiment()
