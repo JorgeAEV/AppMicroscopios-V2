@@ -8,9 +8,7 @@ GPIO.setmode(GPIO.BCM)
 # Diccionario de LEDs por cámara (ajustar pines según conexiones reales)
 LED_PINS = {
     0: 17,
-    1: 27,
-    2: 22,
-    3: 23
+    1: 22,
 }
 
 # Inicializar

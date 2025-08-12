@@ -1,7 +1,7 @@
 # main.py
 from flask import Flask, request, jsonify, Response
-from Servidor.camera_manager import detect_cameras, generate_frames, set_camera, get_current_camera, cameras
-from Servidor.experiment import start_experiment_thread, stop_experiment
+from camera_manager import detect_cameras, generate_frames, set_camera, get_current_camera, cameras
+from experiment import start_experiment_thread, stop_experiment
 import os
 
 app = Flask(__name__)

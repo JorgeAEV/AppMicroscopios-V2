@@ -6,8 +6,8 @@ from datetime import datetime
 import cv2
 
 from led_control import turn_on_led, turn_off_led
-from Servidor.dht_sensor import read_dht
-from Servidor.camera_manager import cameras, capture_frame
+from dht_sensor import read_dht
+from camera_manager import cameras, capture_frame
 from utils import create_experiment_dirs, save_image_with_timestamp
 
 experiment_thread = None
