@@ -1,9 +1,14 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QLineEdit, QFileDialog, QSpinBox, QMessageBox, QFormLayout, QProgressBar
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QLineEdit, 
+    QFileDialog, QSpinBox, QMessageBox, QFormLayout, QProgressBar, QFrame
+)
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont, QColor, QPalette
 from network import NetworkClient
 from utils import format_duration
 import os
 import time
+
 
 class TabExperimento(QWidget):
     def __init__(self):
@@ -17,12 +22,27 @@ class TabExperimento(QWidget):
         self.timer.timeout.connect(self.update_time_left)
 
     def init_ui(self):
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(15)
 
+        # Título
+        title_label = QLabel("Control de Experimento")
+        title_label.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(title_label)
+
+        # Línea separadora
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        main_layout.addWidget(separator)
+
+        # Formulario
         form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.path_edit = QLineEdit()
-        self.btn_browse = QPushButton("Seleccionar carpeta")
+        self.btn_browse = QPushButton("📁 Seleccionar carpeta")
         self.btn_browse.clicked.connect(self.browse_folder)
 
         path_layout = QHBoxLayout()
@@ -34,33 +54,45 @@ class TabExperimento(QWidget):
         self.duration_spin.setRange(1, 14400)  # 1 seg a 4 horas
         self.duration_spin.setValue(300)
         self.duration_spin.setSuffix(" seg")
-        form_layout.addRow("Duración total (segundos):", self.duration_spin)
+        form_layout.addRow("Duración total:", self.duration_spin)
 
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 3600)  # 1 seg a 1 hora
         self.interval_spin.setValue(60)
         self.interval_spin.setSuffix(" seg")
-        form_layout.addRow("Intervalo entre capturas (segundos):", self.interval_spin)
+        form_layout.addRow("Intervalo entre capturas:", self.interval_spin)
 
-        layout.addLayout(form_layout)
+        main_layout.addLayout(form_layout)
 
-        self.btn_start = QPushButton("Iniciar Experimento")
+        # Botones de control
+        buttons_layout = QHBoxLayout()
+
+        self.btn_start = QPushButton("▶ Iniciar Experimento")
+        self.btn_start.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         self.btn_start.clicked.connect(self.start_experiment)
-        layout.addWidget(self.btn_start)
 
-        self.btn_stop = QPushButton("Detener Experimento")
+        self.btn_stop = QPushButton("⏹ Detener Experimento")
+        self.btn_stop.setStyleSheet("background-color: #E53935; color: white; font-weight: bold;")
         self.btn_stop.clicked.connect(self.stop_experiment)
         self.btn_stop.setEnabled(False)
-        layout.addWidget(self.btn_stop)
 
+        buttons_layout.addWidget(self.btn_start)
+        buttons_layout.addWidget(self.btn_stop)
+        main_layout.addLayout(buttons_layout)
+
+        # Estado y progreso
         self.lbl_time_left = QLabel("Tiempo restante: --:--:--")
-        layout.addWidget(self.lbl_time_left)
+        self.lbl_time_left.setFont(QFont("Consolas", 12))
+        self.lbl_time_left.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.lbl_time_left)
 
         self.progress_bar = QProgressBar()
-        layout.addWidget(self.progress_bar)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        main_layout.addWidget(self.progress_bar)
 
-        layout.addStretch()
-        self.setLayout(layout)
+        main_layout.addStretch()
+        self.setLayout(main_layout)
 
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta para guardar imágenes")
