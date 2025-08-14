@@ -9,16 +9,16 @@ import os
 
 app = Flask(__name__)
 
-# Configura aquí los GPIO usados por cada cámara
+# Configuración de los GPIO usados por cada cámara
 CAMERA_LED_PIN_MAP = {
     0: 17,  # GPIO 17 para cámara 0
     1: 27,  # GPIO 27 para cámara 1
-    # Agrega más según tus cámaras
+    # Agrega más
 }
 
 camera_manager = CameraManager()
 led_controller = LedController(CAMERA_LED_PIN_MAP)
-dht_sensor = DHTSensor(pin=4)  # Cambia al pin correcto del DHT11
+dht_sensor = DHTSensor(pin=4)  # pin  del DHT11
 dht_sensor.start()
 
 experiment = Experiment(camera_manager, led_controller, dht_sensor)
@@ -89,6 +89,24 @@ def shutdown():
 
     threading.Thread(target=shutdown_server).start()
     return "Shutting down...", 200
+
+@app.route("/list_folders", methods=["GET"])
+def list_folders():
+    base_path = "/home/pi/experimentos"
+    os.makedirs(base_path, exist_ok=True)
+    folders = [f for f in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, f))]
+    return jsonify(folders)
+
+@app.route("/create_folder", methods=["POST"])
+def create_folder():
+    base_path = "/home/pi/experimentos"
+    data = request.json
+    folder_name = data.get("name")
+    if not folder_name:
+        return jsonify({"error": "No folder name provided"}), 400
+    target_path = os.path.join(base_path, folder_name)
+    os.makedirs(target_path, exist_ok=True)
+    return jsonify({"path": target_path})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)

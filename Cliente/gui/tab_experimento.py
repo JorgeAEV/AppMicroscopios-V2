@@ -141,6 +141,6 @@ class TabExperimento(QWidget):
             self.time_left -= 1
             self.lbl_time_left.setText(f"Tiempo restante: {format_duration(self.time_left)}")
             total = self.duration_spin.value()
-            self.progress_bar.setValue(100 * (total - self.time_left) / total)
+            self.progress_bar.setValue(int(100 * (total - self.time_left) / total))
         else:
             self.stop_experiment()
