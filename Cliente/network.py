@@ -53,6 +53,14 @@ class NetworkClient:
             return r.json()
         except RequestException as e:
             return {'status': 'error', 'message': str(e)}
+    
+    def shutdown_server(self):
+        try:
+            r = requests.post(f"{self.base_url}/shutdown", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            return {'status': 'error', 'message': str(e)}
 
     def get_status(self):
         try:
@@ -61,3 +69,10 @@ class NetworkClient:
             return r.json()
         except RequestException:
             return {}
+    
+    def list_folders(self):
+        return requests.get(f"{self.base_url}/list_folders").json()
+
+    def create_folder(self, name):
+        return requests.post(f"{self.base_url}/create_folder", json={"name": name}).json()
+
