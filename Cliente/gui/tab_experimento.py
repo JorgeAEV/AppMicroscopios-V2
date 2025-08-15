@@ -1,13 +1,13 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QLineEdit, 
-    QFileDialog, QSpinBox, QMessageBox, QFormLayout, QProgressBar, QFrame
+    QWidget, QVBoxLayout, QLabel, QPushButton,
+    QHBoxLayout, QLineEdit, QInputDialog, QSpinBox,
+    QMessageBox, QFormLayout, QProgressBar, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QColor, QPalette
+from PyQt6.QtGui import QFont
 from network import NetworkClient
 from utils import format_duration
 import os
-import time
 
 
 class TabExperimento(QWidget):
@@ -16,102 +16,110 @@ class TabExperimento(QWidget):
         self.client = NetworkClient()
         self.is_running = False
         self.time_left = 0
+        self.server_folder = None
 
         self.init_ui()
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_time_left)
 
     def init_ui(self):
-        main_layout = QVBoxLayout()
-        main_layout.setSpacing(15)
+        layout = QVBoxLayout()
+        layout.setSpacing(12)
 
-        # Título
-        title_label = QLabel("Control de Experimento")
-        title_label.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title_label)
+        title = QLabel("▶ Control de Experimentos")
+        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
 
-        # Línea separadora
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Sunken)
-        main_layout.addWidget(separator)
+        layout.addWidget(separator)
 
-        # Formulario
         form_layout = QFormLayout()
         form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.path_edit = QLineEdit()
-        self.btn_browse = QPushButton("📁 Seleccionar carpeta")
-        self.btn_browse.clicked.connect(self.browse_folder)
+        self.path_edit.setReadOnly(True)
+        btn_select = QPushButton("📁 Elegir carpeta (Servidor)")
+        btn_select.clicked.connect(self.select_server_folder)
+        btn_select.setStyleSheet("background-color: #2980B9; color: white; padding: 6px; border-radius: 4px;")
 
         path_layout = QHBoxLayout()
         path_layout.addWidget(self.path_edit)
-        path_layout.addWidget(self.btn_browse)
-        form_layout.addRow("Ruta para guardar imágenes:", path_layout)
+        path_layout.addWidget(btn_select)
+        form_layout.addRow("Carpeta en servidor:", path_layout)
 
         self.duration_spin = QSpinBox()
-        self.duration_spin.setRange(1, 14400)  # 1 seg a 4 horas
+        self.duration_spin.setRange(1, 14400)
         self.duration_spin.setValue(300)
         self.duration_spin.setSuffix(" seg")
         form_layout.addRow("Duración total:", self.duration_spin)
 
         self.interval_spin = QSpinBox()
-        self.interval_spin.setRange(1, 3600)  # 1 seg a 1 hora
+        self.interval_spin.setRange(1, 3600)
         self.interval_spin.setValue(60)
         self.interval_spin.setSuffix(" seg")
         form_layout.addRow("Intervalo entre capturas:", self.interval_spin)
 
-        main_layout.addLayout(form_layout)
+        layout.addLayout(form_layout)
 
-        # Botones de control
-        buttons_layout = QHBoxLayout()
-
+        btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ Iniciar Experimento")
-        self.btn_start.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.btn_start.setStyleSheet("background-color: #27AE60; color: white; padding: 8px; border-radius: 6px;")
         self.btn_start.clicked.connect(self.start_experiment)
 
         self.btn_stop = QPushButton("⏹ Detener Experimento")
-        self.btn_stop.setStyleSheet("background-color: #E53935; color: white; font-weight: bold;")
+        self.btn_stop.setStyleSheet("background-color: #C0392B; color: white; padding: 8px; border-radius: 6px;")
         self.btn_stop.clicked.connect(self.stop_experiment)
         self.btn_stop.setEnabled(False)
 
-        buttons_layout.addWidget(self.btn_start)
-        buttons_layout.addWidget(self.btn_stop)
-        main_layout.addLayout(buttons_layout)
+        btn_layout.addWidget(self.btn_start)
+        btn_layout.addWidget(self.btn_stop)
+        layout.addLayout(btn_layout)
 
-        # Estado y progreso
         self.lbl_time_left = QLabel("Tiempo restante: --:--:--")
         self.lbl_time_left.setFont(QFont("Consolas", 12))
         self.lbl_time_left.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(self.lbl_time_left)
+        layout.addWidget(self.lbl_time_left)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
-        main_layout.addWidget(self.progress_bar)
+        layout.addWidget(self.progress_bar)
 
-        main_layout.addStretch()
-        self.setLayout(main_layout)
+        layout.addStretch()
+        self.setLayout(layout)
 
-    def browse_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta para guardar imágenes")
-        if folder:
-            self.path_edit.setText(folder)
+    def select_server_folder(self):
+        try:
+            folders = self.client.list_folders()
+            folder, ok = QInputDialog.getItem(
+                self, "Seleccionar carpeta en servidor",
+                "Carpetas existentes:", folders, editable=True
+            )
+            if ok and folder:
+                resp = self.client.create_folder(folder)
+                if 'path' in resp:
+                    self.server_folder = resp['path']
+                    self.path_edit.setText(self.server_folder)
+                else:
+                    QMessageBox.warning(self, "Error", "No se pudo crear la carpeta en el servidor.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo obtener carpetas del servidor:\n{e}")
 
     def start_experiment(self):
         if self.is_running:
             return
-        path = self.path_edit.text().strip()
-        if not path or not os.path.isdir(path):
-            QMessageBox.warning(self, "Error", "Debe seleccionar una carpeta válida")
+        if not self.server_folder:
+            QMessageBox.warning(self, "Error", "Debe seleccionar una carpeta válida en el servidor.")
             return
         duration = self.duration_spin.value()
         interval = self.interval_spin.value()
         if interval > duration:
-            QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración")
+            QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración.")
             return
-        resp = self.client.start_experiment(path, duration, interval)
+        resp = self.client.start_experiment(self.server_folder, duration, interval)
         if resp.get('status') == 'ok':
             self.is_running = True
             self.time_left = duration
@@ -119,7 +127,7 @@ class TabExperimento(QWidget):
             self.btn_stop.setEnabled(True)
             self.timer.start(1000)
         else:
-            QMessageBox.critical(self, "Error", f"No se pudo iniciar experimento: {resp.get('message')}")
+            QMessageBox.critical(self, "Error", f"No se pudo iniciar experimento:\n{resp.get('message')}")
 
     def stop_experiment(self):
         if not self.is_running:
@@ -134,7 +142,7 @@ class TabExperimento(QWidget):
             self.lbl_time_left.setText("Tiempo restante: --:--:--")
             self.progress_bar.setValue(0)
         else:
-            QMessageBox.critical(self, "Error", f"No se pudo detener experimento: {resp.get('message')}")
+            QMessageBox.critical(self, "Error", f"No se pudo detener experimento:\n{resp.get('message')}")
 
     def update_time_left(self):
         if self.time_left > 0:

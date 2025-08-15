@@ -2,10 +2,11 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QPushButton, 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QImage, QFont
 import cv2
-import numpy as np
 from video_thread import VideoThread
 from network import NetworkClient
-import matplotlib.pyplot as plt
+
+# Importar funciones desde archivo independiente
+from gui.utils_calibracion import show_rgb_histogram, show_brightness_histogram
 
 
 class TabCalibracion(QWidget):
@@ -73,11 +74,11 @@ class TabCalibracion(QWidget):
         slider_layout.addWidget(self.slider)
         layout.addLayout(slider_layout)
 
-        # === Botón de histograma ===
-        self.btn_histograma = QPushButton("📊 Mostrar Histograma RGB")
-        self.btn_histograma.clicked.connect(self.show_histogram)
-        self.btn_histograma.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self.btn_histograma.setStyleSheet("""
+        # === Botón de histograma RGB ===
+        self.btn_histograma_rgb = QPushButton("📊 Mostrar Histograma RGB")
+        self.btn_histograma_rgb.clicked.connect(self.show_histogram_rgb)
+        self.btn_histograma_rgb.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.btn_histograma_rgb.setStyleSheet("""
             QPushButton {
                 background-color: #0078D7;
                 color: white;
@@ -88,7 +89,24 @@ class TabCalibracion(QWidget):
                 background-color: #005a9e;
             }
         """)
-        layout.addWidget(self.btn_histograma)
+        layout.addWidget(self.btn_histograma_rgb)
+
+        # === Botón de histograma de brillo ===
+        self.btn_histograma_brightness = QPushButton("📈 Mostrar Histograma de Brillo")
+        self.btn_histograma_brightness.clicked.connect(self.show_histogram_brightness)
+        self.btn_histograma_brightness.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.btn_histograma_brightness.setStyleSheet("""
+            QPushButton {
+                background-color: #28A745;
+                color: white;
+                padding: 8px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #1e7e34;
+            }
+        """)
+        layout.addWidget(self.btn_histograma_brightness)
 
         layout.addStretch()
         self.setLayout(layout)
@@ -118,35 +136,29 @@ class TabCalibracion(QWidget):
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
         qt_img = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-        pixmap = QPixmap.fromImage(qt_img).scaled(self.image_label.width(), self.image_label.height(), Qt.AspectRatioMode.KeepAspectRatio)
+        pixmap = QPixmap.fromImage(qt_img).scaled(
+            self.image_label.width(),
+            self.image_label.height(),
+            Qt.AspectRatioMode.KeepAspectRatio
+        )
         self.image_label.setPixmap(pixmap)
 
     def led_intensity_changed(self, value):
         # Aquí se podría implementar control PWM si el servidor lo soporta
         print(f"Intensidad LED cambiada a {value}% (no implementado en servidor)")
 
-    def show_histogram(self):
-        if not self.video_thread:
-            QMessageBox.warning(self, "⚠️ Advertencia", "No hay video activo para analizar")
+    def show_histogram_rgb(self):
+        pixmap = self.image_label.pixmap()
+        if pixmap is None:
+            QMessageBox.warning(self, "⚠️ Advertencia", "No hay video activo para analizar.")
             return
-        try:
-            pixmap = self.image_label.pixmap()
-            if pixmap is None:
-                raise Exception("No hay imagen disponible")
-            img = pixmap.toImage()
-            ptr = img.bits()
-            ptr.setsize(img.byteCount())
-            arr = np.array(ptr).reshape(img.height(), img.width(), 4)
-            img_rgb = cv2.cvtColor(arr, cv2.COLOR_RGBA2RGB)
+        img = pixmap.toImage()
+        show_rgb_histogram(img)
 
-            # Histogramas
-            color = ('r', 'g', 'b')
-            plt.figure("Histograma RGB")
-            for i, col in enumerate(color):
-                hist = cv2.calcHist([img_rgb], [i], None, [256], [0, 256])
-                plt.plot(hist, color=col)
-                plt.xlim([0, 256])
-            plt.title("Histograma RGB")
-            plt.show()
-        except Exception as e:
-            QMessageBox.warning(self, "❌ Error", f"No se pudo generar histograma: {e}")
+    def show_histogram_brightness(self):
+        pixmap = self.image_label.pixmap()
+        if pixmap is None:
+            QMessageBox.warning(self, "⚠️ Advertencia", "No hay video activo para analizar.")
+            return
+        img = pixmap.toImage()
+        show_brightness_histogram(img)
