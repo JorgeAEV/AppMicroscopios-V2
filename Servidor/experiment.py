@@ -25,8 +25,8 @@ class Experiment:
         self.duration = duration_sec
         self.interval = interval_sec
 
-        os.makedirs(self.save_path, exist_ok=True)
-        # Crear carpeta por cámara
+        # La carpeta principal ya fue creada por el servidor
+        # Solo necesitamos crear las subcarpetas por cámara
         for cam_id in self.camera_manager.cameras:
             cam_folder = os.path.join(self.save_path, f"Microscopio{cam_id}")
             os.makedirs(cam_folder, exist_ok=True)
@@ -81,6 +81,7 @@ class Experiment:
         if not self.running:
             return
         self._stop_event.set()
-        self._thread.join()
+        if self._thread:
+            self._thread.join()
         self.running = False
         self.led_controller.all_off()

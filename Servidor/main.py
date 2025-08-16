@@ -8,7 +8,6 @@ import threading
 import os
 from config import BASE_FOLDER_PATH
 
-
 app = Flask(__name__)
 
 # Configuración de los GPIO usados por cada cámara
@@ -20,7 +19,7 @@ CAMERA_LED_PIN_MAP = {
 
 camera_manager = CameraManager()
 led_controller = LedController(CAMERA_LED_PIN_MAP)
-dht_sensor = DHTSensor(pin=4)  # pin  del DHT11
+dht_sensor = DHTSensor(pin=4)  # pin del DHT11
 dht_sensor.start()
 
 experiment = Experiment(camera_manager, led_controller, dht_sensor)
@@ -55,14 +54,30 @@ def sensor_data():
 @app.route('/experiment/start', methods=['POST'])
 def start_experiment():
     data = request.json
-    save_path = data.get('save_path')
+    save_path = data.get('save_path')  # Ruta relativa al directorio base
     duration = data.get('duration')
     interval = data.get('interval')
+    
     if not all([save_path, duration, interval]):
         return jsonify({'status': 'error', 'message': 'Faltan parámetros'}), 400
+    
     try:
-        experiment.start(save_path, duration, interval)
+        # Convertir a ruta absoluta y segura
+        abs_save_path = safe_join(BASE_FOLDER_PATH, save_path)
+        
+        # Verificar si la carpeta existe o crearla
+        os.makedirs(abs_save_path, exist_ok=True)
+        
+        # Iniciar experimento con la ruta absoluta
+        experiment.start(abs_save_path, duration, interval)
         return jsonify({'status': 'ok'})
+    except ValueError as ve:
+        return jsonify({'status': 'error', 'message': str(ve)}), 400
+    except PermissionError:
+        return jsonify({
+            'status': 'error', 
+            'message': f'Sin permisos para crear/escritura en: {abs_save_path}'
+        }), 403
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -99,44 +114,7 @@ def safe_join(base, *paths):
         raise ValueError("Ruta fuera del directorio permitido")
     return final_path
 
-@app.route('/list_folders', methods=['GET'])
-def list_folders():
-    """
-    Lista todas las carpetas dentro del directorio base.
-    """
-    try:
-        folders = [
-            f for f in os.listdir(BASE_FOLDER_PATH)
-            if os.path.isdir(os.path.join(BASE_FOLDER_PATH, f))
-        ]
-        return jsonify({"status": "success", "folders": folders})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/create_folder', methods=['POST'])
-def create_folder():
-    """
-    Crea una carpeta nueva dentro del directorio base.
-    """
-    try:
-        data = request.get_json()
-        folder_name = data.get("folder_name", "").strip()
-
-        if not folder_name:
-            return jsonify({"status": "error", "message": "Nombre de carpeta vacío"}), 400
-
-        if "/" in folder_name or "\\" in folder_name:
-            return jsonify({"status": "error", "message": "Nombre de carpeta inválido"}), 400
-
-        folder_path = safe_join(BASE_FOLDER_PATH, folder_name)
-        os.makedirs(folder_path, exist_ok=True)
-
-        return jsonify({"status": "success", "message": f"Carpeta '{folder_name}' creada"})
-    except ValueError as ve:
-        return jsonify({"status": "error", "message": str(ve)}), 400
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
+# Único endpoint para listar directorios
 @app.route('/list_dir', methods=['GET'])
 def list_dir():
     """
@@ -154,9 +132,59 @@ def list_dir():
         folders = [f for f in items if os.path.isdir(os.path.join(abs_path, f))]
         files = [f for f in items if os.path.isfile(os.path.join(abs_path, f))]
 
-        return jsonify({"status": "success", "folders": folders, "files": files})
+        # Calcular la ruta del directorio padre (relativa al directorio base)
+        parent_path = os.path.dirname(sub_path) if sub_path else ""
+        
+        return jsonify({
+            "status": "success",
+            "current_path": sub_path,  # Ruta relativa actual
+            "parent_path": parent_path,  # Ruta relativa del padre (para subir)
+            "folders": folders,
+            "files": files
+        })
     except ValueError as ve:
         return jsonify({"status": "error", "message": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/create_folder', methods=['POST'])
+def create_folder():
+    """
+    Crea una carpeta (o estructura de carpetas) dentro del directorio base.
+    Recibe en el JSON: {"folder_path": "ruta/relativa"}
+    """
+    try:
+        data = request.get_json()
+        folder_path = data.get("folder_path", "").strip()
+
+        if not folder_path:
+            return jsonify({"status": "error", "message": "Ruta de carpeta vacía"}), 400
+
+        # Convertir a ruta absoluta dentro del directorio base
+        try:
+            abs_path = safe_join(BASE_FOLDER_PATH, folder_path)
+        except ValueError as ve:
+            return jsonify({"status": "error", "message": str(ve)}), 400
+
+        # Crear todas las subcarpetas necesarias
+        try:
+            os.makedirs(abs_path, exist_ok=True)
+            return jsonify({
+                "status": "success", 
+                "message": f"Ruta creada: {folder_path}",
+                "path": folder_path  # Ruta relativa creada
+            })
+        except PermissionError:
+            return jsonify({
+                "status": "error",
+                "message": f"Sin permisos para crear: {abs_path}"
+            }), 403
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Error creando carpetas: {str(e)}"
+            }), 500
+
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

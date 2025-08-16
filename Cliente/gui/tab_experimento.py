@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from network import NetworkClient
 from utils import format_duration
-
+from gui.folder_navigator import FolderNavigator
 
 class TabExperimento(QWidget):
     def __init__(self):
@@ -15,7 +15,7 @@ class TabExperimento(QWidget):
         self.client = NetworkClient()
         self.is_running = False
         self.time_left = 0
-        self.server_folder = None
+        self.server_folder = None  # Ruta relativa de la carpeta seleccionada
 
         self.init_ui()
         self.timer = QTimer()
@@ -38,39 +38,34 @@ class TabExperimento(QWidget):
         separator.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(separator)
 
-        # Formulario
-        form_layout = QFormLayout()
-        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        # Navegador de carpetas
+        layout.addWidget(QLabel("Navegador de Carpetas:"))
+        self.folder_navigator = FolderNavigator(self.client)
+        self.folder_navigator.folder_selected.connect(self.on_folder_selected)
+        layout.addWidget(self.folder_navigator)
 
-        # Campo de carpeta
+        # Ruta seleccionada
+        layout.addWidget(QLabel("Carpeta seleccionada para el experimento:"))
         self.path_edit = QLineEdit()
         self.path_edit.setReadOnly(True)
         self.path_edit.setStyleSheet("background-color: #f0f0f0; padding: 6px; border-radius: 4px;")
+        layout.addWidget(self.path_edit)
 
-        # Botones de carpeta
-        btn_create = QPushButton("📂 Crear nueva carpeta")
-        btn_create.clicked.connect(self.create_server_folder)
-        btn_create.setStyleSheet("""
-            QPushButton {
-                background-color: #16A085; color: white; padding: 6px; border-radius: 6px;
+        # Botón para crear carpeta
+        self.btn_create = QPushButton("📂 Crear nueva carpeta aquí")
+        self.btn_create.setStyleSheet("""
+            QPushButton { 
+                background-color: #16A085; color: white; padding: 6px; 
+                border-radius: 6px; font-weight: bold;
             }
             QPushButton:hover { background-color: #1ABC9C; }
         """)
+        self.btn_create.clicked.connect(self.create_folder_in_current)
+        layout.addWidget(self.btn_create)
 
-        btn_select = QPushButton("📁 Elegir carpeta existente")
-        btn_select.clicked.connect(self.select_server_folder)
-        btn_select.setStyleSheet("""
-            QPushButton {
-                background-color: #2980B9; color: white; padding: 6px; border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #3498DB; }
-        """)
-
-        folder_layout = QHBoxLayout()
-        folder_layout.addWidget(self.path_edit)
-        folder_layout.addWidget(btn_create)
-        folder_layout.addWidget(btn_select)
-        form_layout.addRow("Carpeta en servidor:", folder_layout)
+        # Formulario
+        form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         # Duración
         self.duration_spin = QSpinBox()
@@ -92,14 +87,20 @@ class TabExperimento(QWidget):
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ Iniciar Experimento")
         self.btn_start.setStyleSheet("""
-            QPushButton { background-color: #27AE60; color: white; padding: 8px; border-radius: 6px; }
+            QPushButton { 
+                background-color: #27AE60; color: white; padding: 8px; 
+                border-radius: 6px; font-weight: bold;
+            }
             QPushButton:hover { background-color: #2ECC71; }
         """)
         self.btn_start.clicked.connect(self.start_experiment)
 
         self.btn_stop = QPushButton("⏹ Detener Experimento")
         self.btn_stop.setStyleSheet("""
-            QPushButton { background-color: #C0392B; color: white; padding: 8px; border-radius: 6px; }
+            QPushButton { 
+                background-color: #C0392B; color: white; padding: 8px; 
+                border-radius: 6px; font-weight: bold;
+            }
             QPushButton:hover { background-color: #E74C3C; }
         """)
         self.btn_stop.clicked.connect(self.stop_experiment)
@@ -120,63 +121,77 @@ class TabExperimento(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setStyleSheet("""
-            QProgressBar { border: 1px solid #aaa; border-radius: 6px; text-align: center; height: 22px; }
-            QProgressBar::chunk { background-color: #27AE60; border-radius: 6px; }
+            QProgressBar { 
+                border: 1px solid #aaa; border-radius: 6px; 
+                text-align: center; height: 22px; 
+            }
+            QProgressBar::chunk { 
+                background-color: #27AE60; border-radius: 6px; 
+            }
         """)
         layout.addWidget(self.progress_bar)
 
         layout.addStretch()
         self.setLayout(layout)
 
-    def create_server_folder(self):
-        """Crea una nueva carpeta en el servidor"""
+    def on_folder_selected(self, folder_path):
+        """Manejador cuando se selecciona una carpeta en el navegador"""
+        self.server_folder = folder_path
+        self.path_edit.setText(folder_path)
+
+    def create_folder_in_current(self):
+        """Crea una nueva carpeta en la ubicación actual del navegador"""
         try:
+            # Obtener ruta actual del navegador
+            current_path = self.folder_navigator.get_current_path()
+            
             folder_name, ok = QInputDialog.getText(
-                self, "Crear nueva carpeta", "Nombre de la carpeta:"
+                self, 
+                "Crear nueva carpeta", 
+                "Nombre de la carpeta:"
             )
+            
             if ok and folder_name.strip():
-                resp = self.client.create_folder(folder_name.strip())
-                if resp.get("status") == "ok" and "path" in resp:
-                    self.server_folder = resp["path"]
-                    self.path_edit.setText(self.server_folder)
-                    QMessageBox.information(self, "Éxito", f"Carpeta creada: {self.server_folder}")
+                # Construir ruta completa
+                if current_path:
+                    new_path = f"{current_path}/{folder_name.strip()}"
                 else:
-                    QMessageBox.warning(self, "Error", f"No se pudo crear carpeta:\n{resp.get('message', '')}")
+                    new_path = folder_name.strip()
+                
+                # Enviar al servidor
+                resp = self.client.create_folder(new_path)
+                
+                if resp.get("status") == "success":
+                    # Actualizar navegador
+                    self.folder_navigator.refresh()
+                    # Seleccionar nueva carpeta automáticamente
+                    self.server_folder = new_path
+                    self.path_edit.setText(new_path)
+                    QMessageBox.information(
+                        self, 
+                        "Éxito", 
+                        f"Carpeta creada:\n{new_path}"
+                    )
+                else:
+                    QMessageBox.warning(
+                        self, 
+                        "Error", 
+                        f"No se pudo crear la carpeta:\n{resp.get('message', '')}"
+                    )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo crear carpeta:\n{e}")
-
-    def select_server_folder(self):
-        """Selecciona una carpeta existente en el servidor"""
-        try:
-            folders = self.client.list_folders()
-            if not isinstance(folders, list):
-                QMessageBox.warning(self, "Error", "La respuesta del servidor no es válida.")
-                return
-
-            folder, ok = QInputDialog.getItem(
-                self,
-                "Elegir carpeta existente",
-                "Seleccione carpeta:",
-                folders,
-                editable=False
-            )
-            if ok and folder:
-                self.server_folder = folder
-                self.path_edit.setText(self.server_folder)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo listar carpetas del servidor:\n{e}")
 
     def start_experiment(self):
         if self.is_running:
             return
         if not self.server_folder:
-            QMessageBox.warning(self, "Error", "Debe seleccionar o crear una carpeta válida en el servidor.")
+            QMessageBox.warning(self, "Error", "Debe seleccionar una carpeta para el experimento")
             return
 
         duration = self.duration_spin.value()
         interval = self.interval_spin.value()
         if interval > duration:
-            QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración.")
+            QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración")
             return
 
         resp = self.client.start_experiment(self.server_folder, duration, interval)
@@ -187,7 +202,7 @@ class TabExperimento(QWidget):
             self.btn_stop.setEnabled(True)
             self.timer.start(1000)
         else:
-            QMessageBox.critical(self, "Error", f"No se pudo iniciar experimento:\n{resp.get('message')}")
+            QMessageBox.critical(self, "Error", f"No se pudo iniciar experimento:\n{resp.get('message', '')}")
 
     def stop_experiment(self):
         if not self.is_running:
@@ -202,7 +217,7 @@ class TabExperimento(QWidget):
             self.lbl_time_left.setText("Tiempo restante: --:--:--")
             self.progress_bar.setValue(0)
         else:
-            QMessageBox.critical(self, "Error", f"No se pudo detener experimento:\n{resp.get('message')}")
+            QMessageBox.critical(self, "Error", f"No se pudo detener experimento:\n{resp.get('message', '')}")
 
     def update_time_left(self):
         if self.time_left > 0:
