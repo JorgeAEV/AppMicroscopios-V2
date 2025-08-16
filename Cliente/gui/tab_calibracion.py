@@ -150,13 +150,13 @@ class TabCalibracion(QWidget):
         if pixmap is None:
             QMessageBox.warning(self, "⚠️ Advertencia", "No hay video activo para analizar.")
             return
-        img = pixmap.toImage()
-        show_rgb_histogram(img)
+        
+        show_rgb_histogram(pixmap.toImage())
 
     def show_histogram_brightness(self):
         pixmap = self.image_label.pixmap()
         if pixmap is None:
             QMessageBox.warning(self, "⚠️ Advertencia", "No hay video activo para analizar.")
             return
-        img = pixmap.toImage()
-        show_brightness_histogram(img)
+        
+        show_brightness_histogram(pixmap.toImage())
