@@ -4,10 +4,11 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFormLayout, QProgressBar, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 from network import NetworkClient
 from utils import format_duration
 from gui.folder_navigator import FolderNavigator
+import re
 
 class TabExperimento(QWidget):
     def __init__(self):
@@ -86,6 +87,7 @@ class TabExperimento(QWidget):
         # Botones de control de experimento
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ Iniciar Experimento")
+        self.btn_start.setIcon(QIcon(":/icons/start.png"))
         self.btn_start.setStyleSheet("""
             QPushButton { 
                 background-color: #27AE60; color: white; padding: 8px; 
@@ -96,6 +98,7 @@ class TabExperimento(QWidget):
         self.btn_start.clicked.connect(self.start_experiment)
 
         self.btn_stop = QPushButton("⏹ Detener Experimento")
+        self.btn_stop.setIcon(QIcon(":/icons/stop.png"))
         self.btn_stop.setStyleSheet("""
             QPushButton { 
                 background-color: #C0392B; color: white; padding: 8px; 
@@ -148,10 +151,20 @@ class TabExperimento(QWidget):
             folder_name, ok = QInputDialog.getText(
                 self, 
                 "Crear nueva carpeta", 
-                "Nombre de la carpeta:"
+                "Nombre de la carpeta (solo letras, números y guiones bajos):"
             )
             
             if ok and folder_name.strip():
+                # Validar nombre de carpeta
+                if not self.is_valid_folder_name(folder_name.strip()):
+                    QMessageBox.warning(
+                        self, 
+                        "Nombre inválido", 
+                        "Solo se permiten letras, números y guiones bajos. "
+                        "No se permiten espacios, caracteres especiales ni barras."
+                    )
+                    return
+                
                 # Construir ruta completa
                 if current_path:
                     new_path = f"{current_path}/{folder_name.strip()}"
@@ -163,10 +176,9 @@ class TabExperimento(QWidget):
                 
                 if resp.get("status") == "success":
                     # Actualizar navegador
+                    self.folder_navigator.current_path = new_path
                     self.folder_navigator.refresh()
-                    # Seleccionar nueva carpeta automáticamente
-                    self.server_folder = new_path
-                    self.path_edit.setText(new_path)
+                    self.on_folder_selected(new_path)
                     QMessageBox.information(
                         self, 
                         "Éxito", 
@@ -181,6 +193,11 @@ class TabExperimento(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo crear carpeta:\n{e}")
 
+    def is_valid_folder_name(self, name):
+        """Valida que el nombre de carpeta sea seguro"""
+        # Solo permite letras, números, guiones bajos
+        return bool(re.match(r'^[a-zA-Z0-9_]+$', name))
+
     def start_experiment(self):
         if self.is_running:
             return
@@ -194,7 +211,10 @@ class TabExperimento(QWidget):
             QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración")
             return
 
-        resp = self.client.start_experiment(self.server_folder, duration, interval)
+        # Sanitizar ruta antes de enviar
+        sanitized_path = self.server_folder.replace("\\", "/")
+        
+        resp = self.client.start_experiment(sanitized_path, duration, interval)
         if resp.get("status") == "ok":
             self.is_running = True
             self.time_left = duration
@@ -216,6 +236,9 @@ class TabExperimento(QWidget):
             self.btn_stop.setEnabled(False)
             self.lbl_time_left.setText("Tiempo restante: --:--:--")
             self.progress_bar.setValue(0)
+            
+            # Actualizar navegador para mostrar resultados
+            self.folder_navigator.refresh()
         else:
             QMessageBox.critical(self, "Error", f"No se pudo detener experimento:\n{resp.get('message', '')}")
 

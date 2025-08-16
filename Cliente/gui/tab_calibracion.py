@@ -4,8 +4,6 @@ from PyQt6.QtGui import QPixmap, QImage, QFont
 import cv2
 from video_thread import VideoThread
 from network import NetworkClient
-
-# Importar funciones desde archivo independiente
 from gui.utils_calibracion import show_rgb_histogram, show_brightness_histogram
 
 

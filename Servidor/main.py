@@ -109,12 +109,13 @@ def shutdown():
 
 def safe_join(base, *paths):
     """Une rutas de forma segura evitando salir del directorio base."""
-    final_path = os.path.abspath(os.path.join(base, *paths))
-    if not final_path.startswith(base):
+    # Normalizar rutas para evitar problemas con barras
+    normalized_paths = [p.replace('\\', '/') for p in paths]
+    final_path = os.path.abspath(os.path.join(base, *normalized_paths))
+    if not final_path.startswith(os.path.abspath(base)):
         raise ValueError("Ruta fuera del directorio permitido")
     return final_path
 
-# Único endpoint para listar directorios
 @app.route('/list_dir', methods=['GET'])
 def list_dir():
     """
@@ -123,6 +124,9 @@ def list_dir():
     """
     try:
         sub_path = request.args.get("path", "").strip()
+        # Normalizar ruta para evitar problemas con barras
+        sub_path = sub_path.replace('\\', '/')
+        
         abs_path = safe_join(BASE_FOLDER_PATH, sub_path)
 
         if not os.path.exists(abs_path):
@@ -156,6 +160,7 @@ def create_folder():
     try:
         data = request.get_json()
         folder_path = data.get("folder_path", "").strip()
+        folder_path = folder_path.replace('\\', '/')  # Normalizar barras
 
         if not folder_path:
             return jsonify({"status": "error", "message": "Ruta de carpeta vacía"}), 400
