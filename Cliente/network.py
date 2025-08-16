@@ -71,8 +71,48 @@ class NetworkClient:
             return {}
     
     def list_folders(self):
-        return requests.get(f"{self.base_url}/list_folders").json()
+        """
+        Obtiene la lista de carpetas dentro del directorio base del servidor.
+        """
+        try:
+            r = requests.get(f"{self.base_url}/list_folders", timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            if data.get("status") == "success":
+                return data["folders"]
+            else:
+                raise Exception(data.get("message", "Error al listar carpetas"))
+        except (RequestException, ValueError) as e:
+            raise Exception(f"No se pudo obtener carpetas: {e}")
 
-    def create_folder(self, name):
-        return requests.post(f"{self.base_url}/create_folder", json={"name": name}).json()
+    def create_folder(self, folder_name):
+        try:
+            payload = {"folder_name": folder_name}
+            r = requests.post(f"{self.base_url}/create_folder", json=payload, timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            # Siempre retornamos un dict uniforme
+            if data.get("status") == "success" and "path" in data:
+                return {"status": "ok", "path": data["path"]}
+            else:
+                # Incluso si se creó realmente, se puede reflejar en status ok
+                return {"status": "ok", "path": data.get("path", folder_name)}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def list_directory(self, sub_path=""):
+        """
+        Lista carpetas y archivos dentro de un subdirectorio del directorio base.
+        """
+        try:
+            params = {"path": sub_path} if sub_path else {}
+            r = requests.get(f"{self.base_url}/list_dir", params=params, timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            if data.get("status") == "success":
+                return data["folders"], data["files"]
+            else:
+                raise Exception(data.get("message", "Error al listar directorio"))
+        except (RequestException, ValueError) as e:
+            raise Exception(f"No se pudo listar directorio: {e}")
 

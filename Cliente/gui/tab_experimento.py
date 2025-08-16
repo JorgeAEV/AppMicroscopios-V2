@@ -7,7 +7,6 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from network import NetworkClient
 from utils import format_duration
-import os
 
 
 class TabExperimento(QWidget):
@@ -24,38 +23,63 @@ class TabExperimento(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(12)
+        layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        title = QLabel("▶ Control de Experimentos")
-        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        # Título
+        title = QLabel("🧪 Control de Experimentos")
+        title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
+        # Separador
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(separator)
 
+        # Formulario
         form_layout = QFormLayout()
         form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
+        # Campo de carpeta
         self.path_edit = QLineEdit()
         self.path_edit.setReadOnly(True)
-        btn_select = QPushButton("📁 Elegir carpeta (Servidor)")
+        self.path_edit.setStyleSheet("background-color: #f0f0f0; padding: 6px; border-radius: 4px;")
+
+        # Botones de carpeta
+        btn_create = QPushButton("📂 Crear nueva carpeta")
+        btn_create.clicked.connect(self.create_server_folder)
+        btn_create.setStyleSheet("""
+            QPushButton {
+                background-color: #16A085; color: white; padding: 6px; border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #1ABC9C; }
+        """)
+
+        btn_select = QPushButton("📁 Elegir carpeta existente")
         btn_select.clicked.connect(self.select_server_folder)
-        btn_select.setStyleSheet("background-color: #2980B9; color: white; padding: 6px; border-radius: 4px;")
+        btn_select.setStyleSheet("""
+            QPushButton {
+                background-color: #2980B9; color: white; padding: 6px; border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #3498DB; }
+        """)
 
-        path_layout = QHBoxLayout()
-        path_layout.addWidget(self.path_edit)
-        path_layout.addWidget(btn_select)
-        form_layout.addRow("Carpeta en servidor:", path_layout)
+        folder_layout = QHBoxLayout()
+        folder_layout.addWidget(self.path_edit)
+        folder_layout.addWidget(btn_create)
+        folder_layout.addWidget(btn_select)
+        form_layout.addRow("Carpeta en servidor:", folder_layout)
 
+        # Duración
         self.duration_spin = QSpinBox()
         self.duration_spin.setRange(1, 14400)
         self.duration_spin.setValue(300)
         self.duration_spin.setSuffix(" seg")
         form_layout.addRow("Duración total:", self.duration_spin)
 
+        # Intervalo
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 3600)
         self.interval_spin.setValue(60)
@@ -64,13 +88,20 @@ class TabExperimento(QWidget):
 
         layout.addLayout(form_layout)
 
+        # Botones de control de experimento
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ Iniciar Experimento")
-        self.btn_start.setStyleSheet("background-color: #27AE60; color: white; padding: 8px; border-radius: 6px;")
+        self.btn_start.setStyleSheet("""
+            QPushButton { background-color: #27AE60; color: white; padding: 8px; border-radius: 6px; }
+            QPushButton:hover { background-color: #2ECC71; }
+        """)
         self.btn_start.clicked.connect(self.start_experiment)
 
         self.btn_stop = QPushButton("⏹ Detener Experimento")
-        self.btn_stop.setStyleSheet("background-color: #C0392B; color: white; padding: 8px; border-radius: 6px;")
+        self.btn_stop.setStyleSheet("""
+            QPushButton { background-color: #C0392B; color: white; padding: 8px; border-radius: 6px; }
+            QPushButton:hover { background-color: #E74C3C; }
+        """)
         self.btn_stop.clicked.connect(self.stop_experiment)
         self.btn_stop.setEnabled(False)
 
@@ -78,49 +109,78 @@ class TabExperimento(QWidget):
         btn_layout.addWidget(self.btn_stop)
         layout.addLayout(btn_layout)
 
+        # Tiempo restante
         self.lbl_time_left = QLabel("Tiempo restante: --:--:--")
-        self.lbl_time_left.setFont(QFont("Consolas", 12))
+        self.lbl_time_left.setFont(QFont("Consolas", 14))
         self.lbl_time_left.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_time_left)
 
+        # Barra de progreso
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar { border: 1px solid #aaa; border-radius: 6px; text-align: center; height: 22px; }
+            QProgressBar::chunk { background-color: #27AE60; border-radius: 6px; }
+        """)
         layout.addWidget(self.progress_bar)
 
         layout.addStretch()
         self.setLayout(layout)
 
+    def create_server_folder(self):
+        """Crea una nueva carpeta en el servidor"""
+        try:
+            folder_name, ok = QInputDialog.getText(
+                self, "Crear nueva carpeta", "Nombre de la carpeta:"
+            )
+            if ok and folder_name.strip():
+                resp = self.client.create_folder(folder_name.strip())
+                if resp.get("status") == "ok" and "path" in resp:
+                    self.server_folder = resp["path"]
+                    self.path_edit.setText(self.server_folder)
+                    QMessageBox.information(self, "Éxito", f"Carpeta creada: {self.server_folder}")
+                else:
+                    QMessageBox.warning(self, "Error", f"No se pudo crear carpeta:\n{resp.get('message', '')}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo crear carpeta:\n{e}")
+
     def select_server_folder(self):
+        """Selecciona una carpeta existente en el servidor"""
         try:
             folders = self.client.list_folders()
+            if not isinstance(folders, list):
+                QMessageBox.warning(self, "Error", "La respuesta del servidor no es válida.")
+                return
+
             folder, ok = QInputDialog.getItem(
-                self, "Seleccionar carpeta en servidor",
-                "Carpetas existentes:", folders, editable=True
+                self,
+                "Elegir carpeta existente",
+                "Seleccione carpeta:",
+                folders,
+                editable=False
             )
             if ok and folder:
-                resp = self.client.create_folder(folder)
-                if 'path' in resp:
-                    self.server_folder = resp['path']
-                    self.path_edit.setText(self.server_folder)
-                else:
-                    QMessageBox.warning(self, "Error", "No se pudo crear la carpeta en el servidor.")
+                self.server_folder = folder
+                self.path_edit.setText(self.server_folder)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo obtener carpetas del servidor:\n{e}")
+            QMessageBox.critical(self, "Error", f"No se pudo listar carpetas del servidor:\n{e}")
 
     def start_experiment(self):
         if self.is_running:
             return
         if not self.server_folder:
-            QMessageBox.warning(self, "Error", "Debe seleccionar una carpeta válida en el servidor.")
+            QMessageBox.warning(self, "Error", "Debe seleccionar o crear una carpeta válida en el servidor.")
             return
+
         duration = self.duration_spin.value()
         interval = self.interval_spin.value()
         if interval > duration:
             QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración.")
             return
+
         resp = self.client.start_experiment(self.server_folder, duration, interval)
-        if resp.get('status') == 'ok':
+        if resp.get("status") == "ok":
             self.is_running = True
             self.time_left = duration
             self.btn_start.setEnabled(False)
@@ -133,7 +193,7 @@ class TabExperimento(QWidget):
         if not self.is_running:
             return
         resp = self.client.stop_experiment()
-        if resp.get('status') == 'ok':
+        if resp.get("status") == "ok":
             self.is_running = False
             self.timer.stop()
             self.time_left = 0
