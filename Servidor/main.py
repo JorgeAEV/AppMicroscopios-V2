@@ -6,6 +6,8 @@ from experiment import Experiment
 from utils import get_raspberry_status
 import threading
 import os
+from config import BASE_FOLDER_PATH
+
 
 app = Flask(__name__)
 
@@ -90,23 +92,73 @@ def shutdown():
     threading.Thread(target=shutdown_server).start()
     return "Shutting down...", 200
 
-@app.route("/list_folders", methods=["GET"])
-def list_folders():
-    base_path = "/home/pi/experimentos"
-    os.makedirs(base_path, exist_ok=True)
-    folders = [f for f in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, f))]
-    return jsonify(folders)
+def safe_join(base, *paths):
+    """Une rutas de forma segura evitando salir del directorio base."""
+    final_path = os.path.abspath(os.path.join(base, *paths))
+    if not final_path.startswith(base):
+        raise ValueError("Ruta fuera del directorio permitido")
+    return final_path
 
-@app.route("/create_folder", methods=["POST"])
+@app.route('/list_folders', methods=['GET'])
+def list_folders():
+    """
+    Lista todas las carpetas dentro del directorio base.
+    """
+    try:
+        folders = [
+            f for f in os.listdir(BASE_FOLDER_PATH)
+            if os.path.isdir(os.path.join(BASE_FOLDER_PATH, f))
+        ]
+        return jsonify({"status": "success", "folders": folders})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/create_folder', methods=['POST'])
 def create_folder():
-    base_path = "/home/pi/experimentos"
-    data = request.json
-    folder_name = data.get("name")
-    if not folder_name:
-        return jsonify({"error": "No folder name provided"}), 400
-    target_path = os.path.join(base_path, folder_name)
-    os.makedirs(target_path, exist_ok=True)
-    return jsonify({"path": target_path})
+    """
+    Crea una carpeta nueva dentro del directorio base.
+    """
+    try:
+        data = request.get_json()
+        folder_name = data.get("folder_name", "").strip()
+
+        if not folder_name:
+            return jsonify({"status": "error", "message": "Nombre de carpeta vacío"}), 400
+
+        if "/" in folder_name or "\\" in folder_name:
+            return jsonify({"status": "error", "message": "Nombre de carpeta inválido"}), 400
+
+        folder_path = safe_join(BASE_FOLDER_PATH, folder_name)
+        os.makedirs(folder_path, exist_ok=True)
+
+        return jsonify({"status": "success", "message": f"Carpeta '{folder_name}' creada"})
+    except ValueError as ve:
+        return jsonify({"status": "error", "message": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/list_dir', methods=['GET'])
+def list_dir():
+    """
+    Lista carpetas y archivos dentro de un subdirectorio del directorio base.
+    Parámetro opcional: ?path=subcarpeta
+    """
+    try:
+        sub_path = request.args.get("path", "").strip()
+        abs_path = safe_join(BASE_FOLDER_PATH, sub_path)
+
+        if not os.path.exists(abs_path):
+            return jsonify({"status": "error", "message": "Ruta no encontrada"}), 404
+
+        items = os.listdir(abs_path)
+        folders = [f for f in items if os.path.isdir(os.path.join(abs_path, f))]
+        files = [f for f in items if os.path.isfile(os.path.join(abs_path, f))]
+
+        return jsonify({"status": "success", "folders": folders, "files": files})
+    except ValueError as ve:
+        return jsonify({"status": "error", "message": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True)
