@@ -29,6 +29,7 @@ experiment = Experiment(camera_manager, led_controller, dht_sensor)
 
 @app.route('/cameras')
 def cameras():
+    # Devuelve lista de IDs de cámaras detectadas
     return jsonify(camera_manager.cameras)
 
 @app.route('/video_feed/<int:cam_id>')
@@ -41,7 +42,7 @@ def video_feed(cam_id):
     )
 
 @app.route('/led/<int:cam_id>/<string:action>', methods=['POST'])
-def led_control(cam_id, action):
+def led_control_endpoint(cam_id, action):
     if cam_id not in camera_manager.cameras:
         return jsonify({'status': 'error', 'message': 'Cámara no encontrada'}), 404
     if action == 'on':
@@ -54,31 +55,58 @@ def led_control(cam_id, action):
 
 @app.route('/sensor')
 def sensor_data():
-    data = dht_sensor.read()  # Nuevo: lectura puntual bajo demanda
+    data = dht_sensor.read()  # Lectura puntual bajo demanda
     return jsonify(data)
 
 @app.route('/experiment/start', methods=['POST'])
 def start_experiment():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     save_path = data.get('save_path')  # Ruta relativa al directorio base
     duration = data.get('duration')
     interval = data.get('interval')
-    
+    camera_ids = data.get('camera_ids')  # NUEVO (opcional): lista de enteros
+
     if not all([save_path, duration, interval]):
         return jsonify({'status': 'error', 'message': 'Faltan parámetros'}), 400
-    
+
+    # Normaliza tipos
+    try:
+        duration = int(duration)
+        interval = int(interval)
+    except Exception:
+        return jsonify({'status': 'error', 'message': 'duration/interval deben ser enteros'}), 400
+
+    # Normaliza camera_ids (puede venir None, lista vacía, lista de strings/ints)
+    selected_ids = None
+    if camera_ids not in (None, [], ()):
+        try:
+            detected = set(camera_manager.cameras)
+            selected_ids = sorted({int(c) for c in camera_ids if int(c) in detected})
+            if not selected_ids:
+                selected_ids = None  # si la lista no tiene válidos, caerá en "todas"
+        except Exception:
+            return jsonify({'status': 'error', 'message': 'camera_ids inválidos'}), 400
+
     try:
         abs_save_path = safe_join(BASE_FOLDER_PATH, save_path)
         os.makedirs(abs_save_path, exist_ok=True)
-        experiment.start(abs_save_path, duration, interval)
-        return jsonify({'status': 'ok'})
+        # Pasa lista (o None) al experimento
+        experiment.start(abs_save_path, duration, interval, camera_ids=selected_ids)
+        return jsonify({
+            'status': 'ok',
+            'save_path': abs_save_path,
+            'camera_ids': experiment.camera_ids  # confirma cuáles se usarán realmente
+        })
     except ValueError as ve:
         return jsonify({'status': 'error', 'message': str(ve)}), 400
     except PermissionError:
         return jsonify({
-            'status': 'error', 
+            'status': 'error',
             'message': f'Sin permisos para crear/escribir en: {abs_save_path}'
         }), 403
+    except RuntimeError as re:
+        # p.ej. "Experimento ya en ejecución"
+        return jsonify({'status': 'error', 'message': str(re)}), 409
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -89,8 +117,19 @@ def stop_experiment():
 
 @app.route('/status')
 def status():
-    status_info = get_raspberry_status()
-    return jsonify(status_info)
+    """
+    Estado del sistema y del experimento en curso.
+    Incluye qué cámaras participan en el experimento actual.
+    """
+    sys_info = get_raspberry_status()
+    exp_info = {
+        'running': experiment.running,
+        'save_path': experiment.save_path,
+        'duration': experiment.duration,
+        'interval': experiment.interval,
+        'camera_ids': experiment.camera_ids  # NUEVO: subconjunto activo (o todas)
+    }
+    return jsonify({'system': sys_info, 'experiment': exp_info})
 
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
@@ -98,9 +137,18 @@ def shutdown():
     Endpoint para apagar el servidor y limpiar GPIO.
     """
     def shutdown_server():
-        led_controller.cleanup()
-        camera_manager.release()
-        dht_sensor.cleanup()  # Nuevo: cleanup en lugar de stop
+        try:
+            led_controller.cleanup()
+        except Exception:
+            pass
+        try:
+            camera_manager.release()
+        except Exception:
+            pass
+        try:
+            dht_sensor.cleanup()  # Nuevo: cleanup en lugar de stop
+        except Exception:
+            pass
         func = request.environ.get('werkzeug.server.shutdown')
         if func:
             func()
@@ -161,7 +209,7 @@ def create_folder():
         try:
             os.makedirs(abs_path, exist_ok=True)
             return jsonify({
-                "status": "success", 
+                "status": "success",
                 "message": f"Ruta creada: {folder_path}",
                 "path": folder_path
             })
@@ -180,4 +228,5 @@ def create_folder():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
+    # threaded=True permite múltiples requests (stream + control) sin bloquear
     app.run(host='0.0.0.0', port=5000, threaded=True)

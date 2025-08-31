@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton,
     QHBoxLayout, QLineEdit, QInputDialog, QSpinBox,
-    QMessageBox, QFormLayout, QProgressBar, QFrame
+    QMessageBox, QFormLayout, QProgressBar, QFrame,
+    QGroupBox, QCheckBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon
@@ -9,6 +10,7 @@ from network import NetworkClient
 from utils import format_duration
 from gui.folder_navigator import FolderNavigator
 import re
+
 
 class TabExperimento(QWidget):
     def __init__(self):
@@ -18,9 +20,17 @@ class TabExperimento(QWidget):
         self.time_left = 0
         self.server_folder = None  # Ruta relativa de la carpeta seleccionada
 
+        # Cámaras detectadas y checkboxes
+        self.cameras = []
+        self.checkboxes = []
+        self.chk_all = None
+
         self.init_ui()
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_time_left)
+
+        # Cargar listado de cámaras
+        self.load_cameras()
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -84,6 +94,24 @@ class TabExperimento(QWidget):
 
         layout.addLayout(form_layout)
 
+        # === Selección de cámaras ===
+        grp = QGroupBox("Cámaras para el experimento")
+        vgrp = QVBoxLayout(grp)
+
+        self.chk_all = QCheckBox("Seleccionar todas")
+        self.chk_all.setChecked(True)
+        self.chk_all.stateChanged.connect(self.toggle_all)
+        vgrp.addWidget(self.chk_all)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll_widget = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        self.scroll.setWidget(self.scroll_widget)
+        vgrp.addWidget(self.scroll)
+
+        layout.addWidget(grp)
+
         # Botones de control de experimento
         btn_layout = QHBoxLayout()
         self.btn_start = QPushButton("▶ Iniciar Experimento")
@@ -137,90 +165,113 @@ class TabExperimento(QWidget):
         layout.addStretch()
         self.setLayout(layout)
 
+    # ------------------------------
+    #   Manejo de carpetas
+    # ------------------------------
     def on_folder_selected(self, folder_path):
-        """Manejador cuando se selecciona una carpeta en el navegador"""
         self.server_folder = folder_path
         self.path_edit.setText(folder_path)
 
     def create_folder_in_current(self):
-        """Crea una nueva carpeta en la ubicación actual del navegador"""
         try:
-            # Obtener ruta actual del navegador
             current_path = self.folder_navigator.get_current_path()
-            
             folder_name, ok = QInputDialog.getText(
-                self, 
-                "Crear nueva carpeta", 
+                self,
+                "Crear nueva carpeta",
                 "Nombre de la carpeta (solo letras, números y guiones bajos):"
             )
-            
             if ok and folder_name.strip():
-                # Validar nombre de carpeta
                 if not self.is_valid_folder_name(folder_name.strip()):
                     QMessageBox.warning(
-                        self, 
-                        "Nombre inválido", 
+                        self,
+                        "Nombre inválido",
                         "Solo se permiten letras, números y guiones bajos. "
                         "No se permiten espacios, caracteres especiales ni barras."
                     )
                     return
-                
-                # Construir ruta completa
                 if current_path:
                     new_path = f"{current_path}/{folder_name.strip()}"
                 else:
                     new_path = folder_name.strip()
-                
-                # Enviar al servidor
                 resp = self.client.create_folder(new_path)
-                
                 if resp.get("status") == "success":
-                    # Actualizar navegador
                     self.folder_navigator.current_path = new_path
                     self.folder_navigator.refresh()
                     self.on_folder_selected(new_path)
-                    QMessageBox.information(
-                        self, 
-                        "Éxito", 
-                        f"Carpeta creada:\n{new_path}"
-                    )
+                    QMessageBox.information(self, "Éxito", f"Carpeta creada:\n{new_path}")
                 else:
-                    QMessageBox.warning(
-                        self, 
-                        "Error", 
-                        f"No se pudo crear la carpeta:\n{resp.get('message', '')}"
-                    )
+                    QMessageBox.warning(self, "Error", f"No se pudo crear la carpeta:\n{resp.get('message', '')}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo crear carpeta:\n{e}")
 
     def is_valid_folder_name(self, name):
-        """Valida que el nombre de carpeta sea seguro"""
-        # Solo permite letras, números, guiones bajos
         return bool(re.match(r'^[a-zA-Z0-9_]+$', name))
 
+    # ------------------------------
+    #   Selección de cámaras
+    # ------------------------------
+    def load_cameras(self):
+        self.cameras = self.client.get_cameras()
+        # Limpia scroll
+        for i in reversed(range(self.scroll_layout.count())):
+            w = self.scroll_layout.itemAt(i).widget()
+            if w:
+                w.setParent(None)
+        self.checkboxes = []
+        for cam_id in self.cameras:
+            cb = QCheckBox(f"Cámara {cam_id}")
+            cb.setChecked(True)
+            cb.stateChanged.connect(self.on_any_cam_changed)
+            self.checkboxes.append((cam_id, cb))
+            self.scroll_layout.addWidget(cb)
+        self.scroll_layout.addStretch()
+
+    def toggle_all(self, _state):
+        checked = self.chk_all.isChecked()
+        for _, cb in self.checkboxes:
+            cb.blockSignals(True)
+            cb.setChecked(checked)
+            cb.blockSignals(False)
+
+    def on_any_cam_changed(self, _state):
+        all_checked = all(cb.isChecked() for _, cb in self.checkboxes)
+        self.chk_all.blockSignals(True)
+        self.chk_all.setChecked(all_checked)
+        self.chk_all.blockSignals(False)
+
+    def selected_camera_ids(self):
+        if self.chk_all.isChecked():
+            return None  # todas
+        selected = [cam_id for cam_id, cb in self.checkboxes if cb.isChecked()]
+        return selected if selected else None
+
+    # ------------------------------
+    #   Control de experimento
+    # ------------------------------
     def start_experiment(self):
         if self.is_running:
             return
         if not self.server_folder:
             QMessageBox.warning(self, "Error", "Debe seleccionar una carpeta para el experimento")
             return
-
         duration = self.duration_spin.value()
         interval = self.interval_spin.value()
         if interval > duration:
             QMessageBox.warning(self, "Error", "El intervalo no puede ser mayor que la duración")
             return
 
-        # Sanitizar ruta antes de enviar
         sanitized_path = self.server_folder.replace("\\", "/")
-        
-        resp = self.client.start_experiment(sanitized_path, duration, interval)
+        cam_ids = self.selected_camera_ids()
+
+        resp = self.client.start_experiment(sanitized_path, duration, interval, camera_ids=cam_ids)
         if resp.get("status") == "ok":
             self.is_running = True
             self.time_left = duration
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.timer.start(1000)
+            used = resp.get("camera_ids", cam_ids or "todas")
+            QMessageBox.information(self, "Experimento iniciado", f"Cámaras utilizadas: {used}")
         else:
             QMessageBox.critical(self, "Error", f"No se pudo iniciar experimento:\n{resp.get('message', '')}")
 
@@ -236,8 +287,6 @@ class TabExperimento(QWidget):
             self.btn_stop.setEnabled(False)
             self.lbl_time_left.setText("Tiempo restante: --:--:--")
             self.progress_bar.setValue(0)
-            
-            # Actualizar navegador para mostrar resultados
             self.folder_navigator.refresh()
         else:
             QMessageBox.critical(self, "Error", f"No se pudo detener experimento:\n{resp.get('message', '')}")

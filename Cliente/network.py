@@ -1,16 +1,18 @@
 import requests
 from requests.exceptions import RequestException
 from config import BASE_URL
-import os
+
 
 class NetworkClient:
     def __init__(self):
-        self.base_url = BASE_URL
+        self.base_url = BASE_URL.rstrip("/")
 
+    # ---------- Cámaras / Streaming ----------
     def get_cameras(self):
         try:
             r = requests.get(f"{self.base_url}/cameras", timeout=5)
             r.raise_for_status()
+            # El servidor devuelve lista de enteros
             return r.json()
         except RequestException:
             return []
@@ -18,14 +20,16 @@ class NetworkClient:
     def get_video_feed_url(self, cam_id):
         return f"{self.base_url}/video_feed/{cam_id}"
 
+    # ---------- LEDs ----------
     def led_control(self, cam_id, action):
         try:
             r = requests.post(f"{self.base_url}/led/{cam_id}/{action}", timeout=5)
             r.raise_for_status()
             return r.json()
         except RequestException:
-            return {'status': 'error', 'message': 'Error de conexión'}
+            return {"status": "error", "message": "Error de conexión"}
 
+    # ---------- Sensor ----------
     def get_sensor_data(self):
         try:
             r = requests.get(f"{self.base_url}/sensor", timeout=5)
@@ -34,18 +38,24 @@ class NetworkClient:
         except RequestException:
             return {}
 
-    def start_experiment(self, save_path, duration, interval):
+    # ---------- Experimento ----------
+    def start_experiment(self, save_path, duration, interval, camera_ids=None):
+        """
+        Inicia un experimento. Si camera_ids es None o [], el servidor usará todas las cámaras.
+        """
         try:
             payload = {
-                'save_path': save_path,
-                'duration': duration,
-                'interval': interval
+                "save_path": save_path,
+                "duration": int(duration),
+                "interval": int(interval),
             }
-            r = requests.post(f"{self.base_url}/experiment/start", json=payload, timeout=5)
+            if camera_ids:
+                payload["camera_ids"] = list(map(int, camera_ids))
+            r = requests.post(f"{self.base_url}/experiment/start", json=payload, timeout=8)
             r.raise_for_status()
             return r.json()
         except RequestException as e:
-            return {'status': 'error', 'message': str(e)}
+            return {"status": "error", "message": str(e)}
 
     def stop_experiment(self):
         try:
@@ -53,27 +63,51 @@ class NetworkClient:
             r.raise_for_status()
             return r.json()
         except RequestException as e:
-            return {'status': 'error', 'message': str(e)}
-    
+            return {"status": "error", "message": str(e)}
+
+    # ---------- Servidor ----------
     def shutdown_server(self):
         try:
             r = requests.post(f"{self.base_url}/shutdown", timeout=5)
             r.raise_for_status()
             return r.json()
         except RequestException as e:
-            return {'status': 'error', 'message': str(e)}
+            return {"status": "error", "message": str(e)}
 
     def get_status(self):
+        """
+        Devuelve el estado del sistema y del experimento.
+        Estructura esperada:
+        {
+          "system": {...},
+          "experiment": {
+              "running": bool,
+              "save_path": str|None,
+              "duration": int,
+              "interval": int,
+              "camera_ids": [int,...] | None
+          }
+        }
+        """
         try:
             r = requests.get(f"{self.base_url}/status", timeout=5)
             r.raise_for_status()
             return r.json()
         except RequestException:
             return {}
-    
+
+    def get_experiment_status(self):
+        """
+        Atajo para extraer sólo el bloque 'experiment' del /status.
+        """
+        data = self.get_status() or {}
+        return data.get("experiment", {}) if isinstance(data, dict) else {}
+
+    # ---------- Archivos / Carpetas ----------
     def list_directory(self, sub_path=""):
         """
         Obtiene la lista de carpetas y archivos dentro de un subdirectorio del directorio base.
+        Lanza Exception con mensaje de alto nivel si algo falla.
         """
         try:
             params = {"path": sub_path} if sub_path else {}
