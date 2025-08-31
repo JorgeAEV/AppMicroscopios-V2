@@ -20,14 +20,62 @@ class NetworkClient:
     def get_video_feed_url(self, cam_id):
         return f"{self.base_url}/video_feed/{cam_id}"
 
-    # ---------- LEDs ----------
+    # ---------- LEDs: ON/OFF por cámara ----------
     def led_control(self, cam_id, action):
+        """
+        action: 'on' | 'off'
+        """
         try:
             r = requests.post(f"{self.base_url}/led/{cam_id}/{action}", timeout=5)
             r.raise_for_status()
             return r.json()
         except RequestException:
             return {"status": "error", "message": "Error de conexión"}
+
+    # ---------- LEDs: brillo por cámara ----------
+    def set_led_brightness(self, cam_id, value):
+        """
+        value: 0..100 (duty cycle)
+        No enciende automáticamente; sólo actualiza el valor.
+        """
+        try:
+            payload = {"value": int(value)}
+            r = requests.post(f"{self.base_url}/led/{cam_id}/brightness", json=payload, timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            return {"status": "error", "message": str(e)}
+
+    def get_led_brightness(self, cam_id):
+        try:
+            r = requests.get(f"{self.base_url}/led/{cam_id}/brightness", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            return {"status": "error", "message": str(e)}
+
+    def get_led_brightness_map(self):
+        """
+        Devuelve {'status':'ok','values': {cam_id: brillo, ...}}
+        """
+        try:
+            r = requests.get(f"{self.base_url}/led/brightness_map", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            return {"status": "error", "message": str(e)}
+
+    # ---------- LEDs: global ----------
+    def led_all(self, action):
+        """
+        action: 'on' | 'off'
+        """
+        try:
+            r = requests.post(f"{self.base_url}/led/all/{action}", timeout=5)
+            r.raise_for_status()
+            return r.json()
+        except RequestException as e:
+            return {"status": "error", "message": str(e)}
 
     # ---------- Sensor ----------
     def get_sensor_data(self):
@@ -85,7 +133,8 @@ class NetworkClient:
               "save_path": str|None,
               "duration": int,
               "interval": int,
-              "camera_ids": [int,...] | None
+              "camera_ids": [int,...] | None,
+              "led_brightness": {cam_id: brillo|None}
           }
         }
         """

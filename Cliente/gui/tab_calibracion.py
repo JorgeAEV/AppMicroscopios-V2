@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSlider, QPushButton, QHBoxLayout, QMessageBox
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QFont
 import cv2
 from video_thread import VideoThread
@@ -13,6 +13,12 @@ class TabCalibracion(QWidget):
         self.client = NetworkClient()
         self.current_cam_id = None  # Será seteado desde fuera o UI
         self.video_thread = None
+
+        # Timer para "debounce" del slider (evita spamear requests)
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(250)  # ms
+        self._debounce.timeout.connect(self._send_brightness)
 
         self.init_ui()
 
@@ -70,6 +76,13 @@ class TabCalibracion(QWidget):
             }
         """)
         slider_layout.addWidget(self.slider)
+
+        # Etiqueta valor %
+        self.lbl_value = QLabel("0%")
+        self.lbl_value.setMinimumWidth(40)
+        self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        slider_layout.addWidget(self.lbl_value)
+
         layout.addLayout(slider_layout)
 
         # === Botón de histograma RGB ===
@@ -109,16 +122,32 @@ class TabCalibracion(QWidget):
         layout.addStretch()
         self.setLayout(layout)
 
+    # ------------------------------
+    #   Flujo de video / LED
+    # ------------------------------
     def start_video(self, cam_id):
         self.current_cam_id = cam_id
+
+        # Detener hilo anterior si lo hay
         if self.video_thread:
             self.video_thread.stop()
+
+        # Arrancar video
         url = self.client.get_video_feed_url(cam_id)
         self.video_thread = VideoThread(url)
         self.video_thread.frame_received.connect(self.update_image)
         self.video_thread.start()
 
-        # Encender LED para calibración al iniciar
+        # Sincronizar slider con valor actual de brillo en servidor
+        resp = self.client.get_led_brightness(cam_id)
+        if resp.get("status") == "ok":
+            val = int(resp.get("value", 0))
+            self.slider.blockSignals(True)
+            self.slider.setValue(val)
+            self.slider.blockSignals(False)
+            self.lbl_value.setText(f"{val}%")
+
+        # Encender LED para calibración al iniciar (respeta brillo guardado)
         self.client.led_control(cam_id, 'on')
 
     def stop_video(self):
@@ -141,16 +170,31 @@ class TabCalibracion(QWidget):
         )
         self.image_label.setPixmap(pixmap)
 
+    # ------------------------------
+    #   Slider -> servidor (debounced)
+    # ------------------------------
     def led_intensity_changed(self, value):
-        # Aquí se podría implementar control PWM si el servidor lo soporta
-        print(f"Intensidad LED cambiada a {value}% (no implementado en servidor)")
+        # Actualiza etiqueta y programa envío con debounce
+        self.lbl_value.setText(f"{value}%")
+        self._debounce.start()
 
+    def _send_brightness(self):
+        if self.current_cam_id is None:
+            return
+        value = self.slider.value()
+        # Enviar nuevo brillo al servidor
+        self.client.set_led_brightness(self.current_cam_id, value)
+        # Si el LED está encendido, el servidor aplica el nuevo duty de inmediato.
+        # No mostramos diálogos aquí para no interrumpir la UI.
+
+    # ------------------------------
+    #   Herramientas de análisis
+    # ------------------------------
     def show_histogram_rgb(self):
         pixmap = self.image_label.pixmap()
         if pixmap is None:
             QMessageBox.warning(self, "⚠️ Advertencia", "No hay video activo para analizar.")
             return
-        
         show_rgb_histogram(pixmap.toImage())
 
     def show_histogram_brightness(self):
@@ -158,5 +202,4 @@ class TabCalibracion(QWidget):
         if pixmap is None:
             QMessageBox.warning(self, "⚠️ Advertencia", "No hay video activo para analizar.")
             return
-        
         show_brightness_histogram(pixmap.toImage())

@@ -41,6 +41,9 @@ def video_feed(cam_id):
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
 
+# ==============================
+#         LEDs: ON/OFF
+# ==============================
 @app.route('/led/<int:cam_id>/<string:action>', methods=['POST'])
 def led_control_endpoint(cam_id, action):
     if cam_id not in camera_manager.cameras:
@@ -53,18 +56,78 @@ def led_control_endpoint(cam_id, action):
         return jsonify({'status': 'error', 'message': 'Acción no válida'}), 400
     return jsonify({'status': 'ok'})
 
+@app.route('/led/all/<string:action>', methods=['POST'])
+def led_control_all_endpoint(action):
+    if action == 'on':
+        led_controller.all_on()
+    elif action == 'off':
+        led_controller.all_off()
+    else:
+        return jsonify({'status': 'error', 'message': 'Acción no válida'}), 400
+    return jsonify({'status': 'ok'})
+
+# ==============================
+#      LEDs: BRIGHTNESS API
+# ==============================
+@app.route('/led/<int:cam_id>/brightness', methods=['GET'])
+def get_led_brightness(cam_id):
+    if cam_id not in camera_manager.cameras:
+        return jsonify({'status': 'error', 'message': 'Cámara no encontrada'}), 404
+    try:
+        val = led_controller.get_brightness(cam_id)
+        return jsonify({'status': 'ok', 'value': val})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/led/<int:cam_id>/brightness', methods=['POST'])
+def set_led_brightness(cam_id):
+    if cam_id not in camera_manager.cameras:
+        return jsonify({'status': 'error', 'message': 'Cámara no encontrada'}), 404
+    data = request.get_json(silent=True) or {}
+    if 'value' not in data:
+        return jsonify({'status': 'error', 'message': 'Falta value'}), 400
+    try:
+        val = int(data['value'])
+        led_controller.set_brightness(cam_id, val)
+        # No encendemos automáticamente; si está encendido, cambiará duty.
+        return jsonify({'status': 'ok', 'value': led_controller.get_brightness(cam_id)})
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'No se pudo ajustar brillo: {e}'}), 500
+
+@app.route('/led/brightness_map', methods=['GET'])
+def get_led_brightness_map():
+    try:
+        # Devuelve el brillo de todas las cámaras con LED mapeado
+        result = {}
+        for cam_id in CAMERA_LED_PIN_MAP.keys():
+            try:
+                result[cam_id] = led_controller.get_brightness(cam_id)
+            except Exception:
+                result[cam_id] = None
+        return jsonify({'status': 'ok', 'values': result})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# ==============================
+#        SENSOR: DHT11
+# ==============================
 @app.route('/sensor')
 def sensor_data():
     data = dht_sensor.read()  # Lectura puntual bajo demanda
     return jsonify(data)
 
+# ==============================
+#        EXPERIMENTO
+# ==============================
 @app.route('/experiment/start', methods=['POST'])
 def start_experiment():
     data = request.get_json(silent=True) or {}
     save_path = data.get('save_path')  # Ruta relativa al directorio base
     duration = data.get('duration')
     interval = data.get('interval')
-    camera_ids = data.get('camera_ids')  # NUEVO (opcional): lista de enteros
+    camera_ids = data.get('camera_ids')  # opcional: lista de enteros
 
     if not all([save_path, duration, interval]):
         return jsonify({'status': 'error', 'message': 'Faltan parámetros'}), 400
@@ -115,22 +178,37 @@ def stop_experiment():
     experiment.stop()
     return jsonify({'status': 'ok'})
 
+# ==============================
+#           STATUS
+# ==============================
 @app.route('/status')
 def status():
     """
     Estado del sistema y del experimento en curso.
-    Incluye qué cámaras participan en el experimento actual.
+    Incluye qué cámaras participan y el brillo por cámara.
     """
     sys_info = get_raspberry_status()
+    # Mapa de brillos actual (si alguna cámara no tiene LED, puede no estar presente)
+    led_map = {}
+    for cam_id in CAMERA_LED_PIN_MAP.keys():
+        try:
+            led_map[cam_id] = led_controller.get_brightness(cam_id)
+        except Exception:
+            led_map[cam_id] = None
+
     exp_info = {
         'running': experiment.running,
         'save_path': experiment.save_path,
         'duration': experiment.duration,
         'interval': experiment.interval,
-        'camera_ids': experiment.camera_ids  # NUEVO: subconjunto activo (o todas)
+        'camera_ids': experiment.camera_ids,  # subconjunto activo (o todas)
+        'led_brightness': led_map
     }
     return jsonify({'system': sys_info, 'experiment': exp_info})
 
+# ==============================
+#          SHUTDOWN
+# ==============================
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
     """
@@ -146,7 +224,7 @@ def shutdown():
         except Exception:
             pass
         try:
-            dht_sensor.cleanup()  # Nuevo: cleanup en lugar de stop
+            dht_sensor.cleanup()  # cleanup en lugar de stop
         except Exception:
             pass
         func = request.environ.get('werkzeug.server.shutdown')
@@ -156,6 +234,9 @@ def shutdown():
     threading.Thread(target=shutdown_server, daemon=True).start()
     return jsonify({'status': 'ok', 'message': 'Shutting down...'}), 200
 
+# ==============================
+#         UTILIDADES
+# ==============================
 def safe_join(base, *paths):
     """Une rutas de forma segura evitando salir del directorio base."""
     normalized_paths = [p.replace('\\', '/') for p in paths]
@@ -164,6 +245,9 @@ def safe_join(base, *paths):
         raise ValueError("Ruta fuera del directorio permitido")
     return final_path
 
+# ==============================
+#       FS: LISTAR/CREAR
+# ==============================
 @app.route('/list_dir', methods=['GET'])
 def list_dir():
     try:
@@ -227,6 +311,9 @@ def create_folder():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# ==============================
+#            RUN
+# ==============================
 if __name__ == '__main__':
     # threaded=True permite múltiples requests (stream + control) sin bloquear
     app.run(host='0.0.0.0', port=5000, threaded=True)
