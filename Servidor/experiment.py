@@ -59,11 +59,16 @@ class Experiment:
 
         # Obtener lectura sensor
         dht_data = self.dht_sensor.get_readings()
+        temp = dht_data['temperature']
+        hum = dht_data['humidity']
 
         # Guardar lectura en archivo resumen (append)
         resumen_path = os.path.join(self.save_path, "resumen_dht.txt")
         with open(resumen_path, 'a') as f:
-            f.write(f"{timestamp} - Temp: {dht_data['temperature']}C, Humidity: {dht_data['humidity']}%\n")
+            if temp is not None and hum is not None:
+                f.write(f"{timestamp} - Temp: {temp:.1f}C, Humidity: {hum:.1f}%\n")
+            else:
+                f.write(f"{timestamp} - Lectura DHT11 fallida\n")
 
         # Tomar fotos y guardar
         for cam_id in self.camera_manager.cameras:
@@ -76,6 +81,7 @@ class Experiment:
 
         # Apagar leds después de tomar fotos
         self.led_controller.all_off()
+
 
     def stop(self):
         if not self.running:
