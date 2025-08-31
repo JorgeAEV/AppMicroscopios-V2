@@ -3,6 +3,7 @@ import time
 import os
 from datetime import datetime
 
+
 class Experiment:
     def __init__(self, camera_manager, led_controller, dht_sensor):
         self.camera_manager = camera_manager
@@ -25,11 +26,15 @@ class Experiment:
         self.duration = duration_sec
         self.interval = interval_sec
 
-        # La carpeta principal ya fue creada por el servidor
-        # Solo necesitamos crear las subcarpetas por cámara
+        # Crear subcarpetas por cámara
         for cam_id in self.camera_manager.cameras:
             cam_folder = os.path.join(self.save_path, f"Microscopio{cam_id}")
             os.makedirs(cam_folder, exist_ok=True)
+
+        # Crear/abrir archivo de resumen al inicio
+        resumen_path = os.path.join(self.save_path, "resumen_dht.txt")
+        with open(resumen_path, 'w') as f:
+            f.write("=== Resumen de lecturas DHT11 ===\n")
 
         self._stop_event.clear()
         self.running = True
@@ -51,26 +56,23 @@ class Experiment:
         self.led_controller.all_off()
 
     def _capture_all(self):
-        # Enciende leds para cada cámara
+        # Encender LEDs
         self.led_controller.all_on()
         time.sleep(0.5)  # Tiempo para estabilizar iluminación
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Obtener lectura sensor
-        dht_data = self.dht_sensor.get_readings()
-        temp = dht_data['temperature']
-        hum = dht_data['humidity']
-
-        # Guardar lectura en archivo resumen (append)
+        # === Lectura DHT11 ===
+        dht_data = self.dht_sensor.read()
         resumen_path = os.path.join(self.save_path, "resumen_dht.txt")
         with open(resumen_path, 'a') as f:
-            if temp is not None and hum is not None:
-                f.write(f"{timestamp} - Temp: {temp:.1f}C, Humidity: {hum:.1f}%\n")
+            if dht_data["temperature"] is not None and dht_data["humidity"] is not None:
+                f.write(f"{timestamp} - Temp: {dht_data['temperature']:.1f}C, "
+                        f"Humidity: {dht_data['humidity']:.1f}%\n")
             else:
                 f.write(f"{timestamp} - Lectura DHT11 fallida\n")
 
-        # Tomar fotos y guardar
+        # === Captura de fotos ===
         for cam_id in self.camera_manager.cameras:
             cam_folder = os.path.join(self.save_path, f"Microscopio{cam_id}")
             photo_path = os.path.join(cam_folder, f"{timestamp}.jpg")
@@ -79,9 +81,8 @@ class Experiment:
             except Exception as e:
                 print(f"Error tomando foto cámara {cam_id}: {e}")
 
-        # Apagar leds después de tomar fotos
+        # Apagar LEDs
         self.led_controller.all_off()
-
 
     def stop(self):
         if not self.running:

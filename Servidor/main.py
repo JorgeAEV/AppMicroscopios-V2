@@ -1,14 +1,13 @@
-from flask import Flask, Response, jsonify, request, send_file
+# main.py
+from flask import Flask, Response, jsonify, request
 from camera_manager import CameraManager
-from dht_sensor import DHTSensor
 from led_control import LedController
 from experiment import Experiment
 from utils import get_raspberry_status
+from config import BASE_FOLDER_PATH
+from dht_sensor import DHTSensor
 import threading
 import os
-from config import BASE_FOLDER_PATH
-import board
-from dht_sensor import DHTSensor
 
 app = Flask(__name__)
 
@@ -16,16 +15,15 @@ app = Flask(__name__)
 CAMERA_LED_PIN_MAP = {
     0: 17,  # GPIO 17 para cámara 0
     1: 27,  # GPIO 27 para cámara 1
-    # Agrega más
+    # Agrega más según sea necesario
 }
 
-# Configuración del pin del DHT11
-DHT11_PIN = board.D4   # Definir el GPIO con Board (ejemplo GPIO4)
+# Configuración del pin BCM para el DHT11
+DHT11_PIN = 4  # GPIO4 en modo BCM
 
 camera_manager = CameraManager()
 led_controller = LedController(CAMERA_LED_PIN_MAP)
-dht_sensor = DHTSensor(pin=DHT11_PIN)  # ahora recibe el objeto board.Dxx
-dht_sensor.start()
+dht_sensor = DHTSensor(pin=DHT11_PIN)  # Nuevo diseño: solo número de pin BCM
 
 experiment = Experiment(camera_manager, led_controller, dht_sensor)
 
@@ -37,23 +35,26 @@ def cameras():
 def video_feed(cam_id):
     if cam_id not in camera_manager.cameras:
         return "Camera not found", 404
-    return Response(camera_manager.generate_frames(cam_id), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(
+        camera_manager.generate_frames(cam_id),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 @app.route('/led/<int:cam_id>/<string:action>', methods=['POST'])
 def led_control(cam_id, action):
     if cam_id not in camera_manager.cameras:
-        return jsonify({'status': 'error', 'message': 'Camara no encontrada'}), 404
+        return jsonify({'status': 'error', 'message': 'Cámara no encontrada'}), 404
     if action == 'on':
         led_controller.on(cam_id)
     elif action == 'off':
         led_controller.off(cam_id)
     else:
-        return jsonify({'status': 'error', 'message': 'Accion no valida'}), 400
+        return jsonify({'status': 'error', 'message': 'Acción no válida'}), 400
     return jsonify({'status': 'ok'})
 
 @app.route('/sensor')
 def sensor_data():
-    data = dht_sensor.get_readings()
+    data = dht_sensor.read()  # Nuevo: lectura puntual bajo demanda
     return jsonify(data)
 
 @app.route('/experiment/start', methods=['POST'])
@@ -67,13 +68,8 @@ def start_experiment():
         return jsonify({'status': 'error', 'message': 'Faltan parámetros'}), 400
     
     try:
-        # Convertir a ruta absoluta y segura
         abs_save_path = safe_join(BASE_FOLDER_PATH, save_path)
-        
-        # Verificar si la carpeta existe o crearla
         os.makedirs(abs_save_path, exist_ok=True)
-        
-        # Iniciar experimento con la ruta absoluta
         experiment.start(abs_save_path, duration, interval)
         return jsonify({'status': 'ok'})
     except ValueError as ve:
@@ -81,7 +77,7 @@ def start_experiment():
     except PermissionError:
         return jsonify({
             'status': 'error', 
-            'message': f'Sin permisos para crear/escritura en: {abs_save_path}'
+            'message': f'Sin permisos para crear/escribir en: {abs_save_path}'
         }), 403
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -99,22 +95,21 @@ def status():
 @app.route('/shutdown', methods=['POST'])
 def shutdown():
     """
-    Opcional: endpoint para apagar el servidor y limpiar GPIO.
+    Endpoint para apagar el servidor y limpiar GPIO.
     """
     def shutdown_server():
         led_controller.cleanup()
         camera_manager.release()
-        dht_sensor.stop()
+        dht_sensor.cleanup()  # Nuevo: cleanup en lugar de stop
         func = request.environ.get('werkzeug.server.shutdown')
         if func:
             func()
 
-    threading.Thread(target=shutdown_server).start()
-    return "Shutting down...", 200
+    threading.Thread(target=shutdown_server, daemon=True).start()
+    return jsonify({'status': 'ok', 'message': 'Shutting down...'}), 200
 
 def safe_join(base, *paths):
     """Une rutas de forma segura evitando salir del directorio base."""
-    # Normalizar rutas para evitar problemas con barras
     normalized_paths = [p.replace('\\', '/') for p in paths]
     final_path = os.path.abspath(os.path.join(base, *normalized_paths))
     if not final_path.startswith(os.path.abspath(base)):
@@ -123,15 +118,9 @@ def safe_join(base, *paths):
 
 @app.route('/list_dir', methods=['GET'])
 def list_dir():
-    """
-    Lista carpetas y archivos dentro de un subdirectorio del directorio base.
-    Parámetro opcional: ?path=subcarpeta
-    """
     try:
         sub_path = request.args.get("path", "").strip()
-        # Normalizar ruta para evitar problemas con barras
         sub_path = sub_path.replace('\\', '/')
-        
         abs_path = safe_join(BASE_FOLDER_PATH, sub_path)
 
         if not os.path.exists(abs_path):
@@ -140,14 +129,12 @@ def list_dir():
         items = os.listdir(abs_path)
         folders = [f for f in items if os.path.isdir(os.path.join(abs_path, f))]
         files = [f for f in items if os.path.isfile(os.path.join(abs_path, f))]
-
-        # Calcular la ruta del directorio padre (relativa al directorio base)
         parent_path = os.path.dirname(sub_path) if sub_path else ""
         
         return jsonify({
             "status": "success",
-            "current_path": sub_path,  # Ruta relativa actual
-            "parent_path": parent_path,  # Ruta relativa del padre (para subir)
+            "current_path": sub_path,
+            "parent_path": parent_path,
             "folders": folders,
             "files": files
         })
@@ -158,31 +145,25 @@ def list_dir():
 
 @app.route('/create_folder', methods=['POST'])
 def create_folder():
-    """
-    Crea una carpeta (o estructura de carpetas) dentro del directorio base.
-    Recibe en el JSON: {"folder_path": "ruta/relativa"}
-    """
     try:
         data = request.get_json()
         folder_path = data.get("folder_path", "").strip()
-        folder_path = folder_path.replace('\\', '/')  # Normalizar barras
+        folder_path = folder_path.replace('\\', '/')
 
         if not folder_path:
             return jsonify({"status": "error", "message": "Ruta de carpeta vacía"}), 400
 
-        # Convertir a ruta absoluta dentro del directorio base
         try:
             abs_path = safe_join(BASE_FOLDER_PATH, folder_path)
         except ValueError as ve:
             return jsonify({"status": "error", "message": str(ve)}), 400
 
-        # Crear todas las subcarpetas necesarias
         try:
             os.makedirs(abs_path, exist_ok=True)
             return jsonify({
                 "status": "success", 
                 "message": f"Ruta creada: {folder_path}",
-                "path": folder_path  # Ruta relativa creada
+                "path": folder_path
             })
         except PermissionError:
             return jsonify({
