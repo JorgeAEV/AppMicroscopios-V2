@@ -7,6 +7,8 @@ from utils import get_raspberry_status
 import threading
 import os
 from config import BASE_FOLDER_PATH
+import board
+from dht_sensor import DHTSensor
 
 app = Flask(__name__)
 
@@ -17,9 +19,12 @@ CAMERA_LED_PIN_MAP = {
     # Agrega más
 }
 
+# Configuración del pin del DHT11
+DHT11_PIN = board.D4   # Definir el GPIO con Board (ejemplo GPIO4)
+
 camera_manager = CameraManager()
 led_controller = LedController(CAMERA_LED_PIN_MAP)
-dht_sensor = DHTSensor(pin=4)  # pin del DHT11
+dht_sensor = DHTSensor(pin=DHT11_PIN)  # ahora recibe el objeto board.Dxx
 dht_sensor.start()
 
 experiment = Experiment(camera_manager, led_controller, dht_sensor)

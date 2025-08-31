@@ -1,18 +1,14 @@
 import adafruit_dht
-import board
 import threading
 import time
 
 class DHTSensor:
-    def __init__(self, pin=4, read_interval=5):
+    def __init__(self, pin, read_interval=5):
         """
-        pin: número del GPIO (ejemplo 4 -> GPIO4)
+        pin: objeto board.Dxx (ejemplo: board.D4)
         read_interval: intervalo en segundos entre lecturas
         """
-        # Convertimos el pin a objeto board (ejemplo: 4 -> board.D4)
-        self.pin = getattr(board, f"D{pin}")
-        self.sensor = adafruit_dht.DHT11(self.pin)
-
+        self.sensor = adafruit_dht.DHT11(pin)
         self.read_interval = read_interval
         self.temperature = None
         self.humidity = None
@@ -30,7 +26,7 @@ class DHTSensor:
     def _read_loop(self):
         while self.running:
             try:
-                # Lectura de temperatura y humedad
+                # Intentar leer valores
                 temperature = self.sensor.temperature
                 humidity = self.sensor.humidity
 
@@ -39,7 +35,7 @@ class DHTSensor:
                     self.humidity = humidity
 
             except Exception as e:
-                # Si ocurre error (muy común con DHT11), guardamos None
+                # El DHT11 suele dar errores ocasionales, manejarlos aquí
                 print(f"Error leyendo DHT11: {e}")
                 with self._lock:
                     self.temperature = None
