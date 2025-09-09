@@ -151,6 +151,19 @@ class NetworkClient:
         """
         data = self.get_status() or {}
         return data.get("experiment", {}) if isinstance(data, dict) else {}
+    
+    def get_raspberry_status(self):
+        """
+        Atajo para consumir /status y devolver sólo el bloque 'system'.
+        Usado en tab_Bienvenida y tab_Visualización.
+        """
+        try:
+            r = requests.get(f"{self.base_url}/status", timeout=5)
+            r.raise_for_status()
+            data = r.json()
+            return data.get("system", {}) if isinstance(data, dict) else {}
+        except RequestException:
+            return {}
 
     # ---------- Archivos / Carpetas ----------
     def list_directory(self, sub_path=""):

@@ -12,5 +12,5 @@ class SystemMonitor(QObject):
         self.timer.start(poll_interval_ms)
 
     def poll_status(self):
-        status = self.client.get_status()
+        status = self.client.get_raspberry_status()
         self.status_updated.emit(status)
